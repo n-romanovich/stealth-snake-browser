@@ -71,7 +71,9 @@ data class SnakeProfile(
     val microJitterEnabled: Boolean,
     val blockExternalSchemes: Boolean,
     val suppressJsDialogs: Boolean,
-    val forceDarkPages: Boolean
+    val forceDarkPages: Boolean,
+    val allowFileUploads: Boolean = false,
+    val allowOAuthPopups: Boolean = false
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -90,6 +92,8 @@ data class SnakeProfile(
         put("blockExternalSchemes", blockExternalSchemes)
         put("suppressJsDialogs", suppressJsDialogs)
         put("forceDarkPages", forceDarkPages)
+        put("allowFileUploads", allowFileUploads)
+        put("allowOAuthPopups", allowOAuthPopups)
     }
 
     companion object {
@@ -113,7 +117,9 @@ data class SnakeProfile(
                 microJitterEnabled = obj.optBoolean("microJitterEnabled", true),
                 blockExternalSchemes = obj.optBoolean("blockExternalSchemes", true),
                 suppressJsDialogs = obj.optBoolean("suppressJsDialogs", true),
-                forceDarkPages = obj.optBoolean("forceDarkPages", false)
+                forceDarkPages = obj.optBoolean("forceDarkPages", false),
+                allowFileUploads = obj.optBoolean("allowFileUploads", false),
+                allowOAuthPopups = obj.optBoolean("allowOAuthPopups", false)
             )
         }
     }
@@ -257,6 +263,14 @@ class SnakePreferences(context: Context) {
         get() = prefs.getBoolean(KEY_SUPPRESS_DIALOGS, true)
         set(value) = putBooleanAndMarkCustom(KEY_SUPPRESS_DIALOGS, value)
 
+    var allowFileUploads: Boolean
+        get() = prefs.getBoolean(KEY_ALLOW_FILE_UPLOADS, false)
+        set(value) = putBooleanAndMarkCustom(KEY_ALLOW_FILE_UPLOADS, value)
+
+    var allowOAuthPopups: Boolean
+        get() = prefs.getBoolean(KEY_ALLOW_OAUTH_POPUPS, false)
+        set(value) = putBooleanAndMarkCustom(KEY_ALLOW_OAUTH_POPUPS, value)
+
     // Session & UI
     var locale: SupportedLocale
         get() = SupportedLocale.fromTag(prefs.getString(KEY_LOCALE, SupportedLocale.SYSTEM.tag))
@@ -378,10 +392,12 @@ class SnakePreferences(context: Context) {
             .putBoolean(KEY_BLOCK_WEBRTC, true)
             .putBoolean(KEY_BLOCK_BEACONS, true)
             .putBoolean(KEY_HIDE_VISIBILITY, true)
-            .putBoolean(KEY_LOCK_VIEWPORT, true)
+            .putBoolean(KEY_LOCK_VIEWPORT, max)
             .putBoolean(KEY_BLOCK_SCHEMES, true)
             .putBoolean(KEY_SUPPRESS_DIALOGS, true)
-            // Compatibility mode relaxes aggressive canvas/audio/sensor/jitter noise for strict anti-bots
+            .putBoolean(KEY_ALLOW_FILE_UPLOADS, !max)
+            .putBoolean(KEY_ALLOW_OAUTH_POPUPS, !max)
+            // Compatibility mode relaxes aggressive canvas/audio/sensor/jitter/viewport locks for compatibility
             .putBoolean(KEY_NOISE_CANVAS, max)
             .putBoolean(KEY_NOISE_AUDIO, max)
             .putBoolean(KEY_SENSOR_FALLBACK, max)
@@ -443,6 +459,8 @@ class SnakePreferences(context: Context) {
             .putBoolean(KEY_BLOCK_SCHEMES, profile.blockExternalSchemes)
             .putBoolean(KEY_SUPPRESS_DIALOGS, profile.suppressJsDialogs)
             .putBoolean(KEY_FORCE_DARK, profile.forceDarkPages)
+            .putBoolean(KEY_ALLOW_FILE_UPLOADS, profile.allowFileUploads)
+            .putBoolean(KEY_ALLOW_OAUTH_POPUPS, profile.allowOAuthPopups)
             .apply()
         return true
     }
@@ -474,7 +492,9 @@ class SnakePreferences(context: Context) {
         microJitterEnabled = microJitterEnabled,
         blockExternalSchemes = blockExternalSchemes,
         suppressJsDialogs = suppressJsDialogs,
-        forceDarkPages = forceDarkPages
+        forceDarkPages = forceDarkPages,
+        allowFileUploads = allowFileUploads,
+        allowOAuthPopups = allowOAuthPopups
     )
 
     private fun syncActiveProfileIfAny() {
@@ -562,6 +582,40 @@ class SnakePreferences(context: Context) {
             "^(localhost|[^/:?#\\s]+\\.[^/:?#\\s]+):(\\d+)([/?#].*)?$",
             RegexOption.IGNORE_CASE
         )
+        private val IPV6_WITH_OPTIONAL_PORT_REGEX = Regex(
+            "^\\[([0-9a-fA-F:]+)](:(\\d{1,5}))?([/?#].*)?$"
+        )
+        private val IPV4_REGEX = Regex("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$")
+        private val DNS_LABEL_REGEX = Regex("^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$")
+        private val ALPHA_TLD_REGEX = Regex("^([a-z]{2,24}|xn--[a-z0-9-]{2,59})$")
+        private val CODE_LINE_FILE_EXTENSIONS = setOf(
+            "js", "ts", "jsx", "tsx", "mjs", "cjs", "kt", "kts", "py", "rb", "go", "rs",
+            "java", "c", "cpp", "cc", "h", "hpp", "cs", "php", "swift", "dart", "scala"
+        )
+        private val NON_URL_FILE_EXTENSIONS = CODE_LINE_FILE_EXTENSIONS + setOf(
+            "pyc", "pyd", "class", "jar", "json", "xml", "yaml", "yml", "toml", "ini",
+            "cfg", "conf", "md", "markdown", "txt", "log", "csv", "tsv", "pdf", "doc",
+            "docx", "xls", "xlsx", "ppt", "pptx", "png", "jpg", "jpeg", "gif", "webp",
+            "svg", "ico", "bmp", "mp3", "mp4", "mkv", "avi", "wav", "flac", "ogg",
+            "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "apk", "aab", "exe", "msi",
+            "dll", "so", "dylib", "bin", "iso", "dmg", "deb", "rpm", "css", "scss",
+            "sass", "less", "html", "htm", "sql", "sqlite", "db", "bat", "cmd", "ps1",
+            "gradle", "properties", "lock", "env", "map", "wasm", "vue", "svelte",
+            "path", "exit", "out", "err", "keys", "values", "entries", "length", "size",
+            "prototype", "constructor", "tostring", "valueof", "parse", "stringify"
+        )
+        private val CODE_RECEIVERS = setOf(
+            "os", "sys", "fs", "io", "re", "math", "window", "document", "console",
+            "navigator", "location", "history", "screen", "process", "module", "exports",
+            "object", "array", "string", "number", "boolean", "promise", "json", "date",
+            "regexp", "error", "symbol", "reflect", "proxy", "system", "intent", "bundle"
+        )
+        private val MAJOR_WEB_TLDS = setOf(
+            "com", "org", "net", "edu", "gov", "mil", "int", "io", "dev", "app", "ai",
+            "co", "uk", "de", "fr", "ru", "jp", "cn", "in", "br", "ca", "au", "nl",
+            "se", "ch", "no", "pl", "ua", "kz", "by", "me", "tv", "cc", "info", "biz",
+            "onion", "local", "lan", "internal"
+        )
 
         private const val KEY_PRESET = "preset"
         private const val KEY_CAPTURE_MODE = "capture_mode"
@@ -586,6 +640,8 @@ class SnakePreferences(context: Context) {
         private const val KEY_JITTER_MAX_SEC = "jitter_max_sec"
         private const val KEY_BLOCK_SCHEMES = "block_schemes"
         private const val KEY_SUPPRESS_DIALOGS = "suppress_dialogs"
+        private const val KEY_ALLOW_FILE_UPLOADS = "allow_file_uploads"
+        private const val KEY_ALLOW_OAUTH_POPUPS = "allow_oauth_popups"
         private const val KEY_LOCALE = "app_locale"
         private const val KEY_CONFIRM_WIPE = "confirm_wipe"
         private const val KEY_AUTO_WIPE_EXIT = "auto_wipe_exit"
@@ -626,23 +682,75 @@ class SnakePreferences(context: Context) {
             return !host.isNullOrBlank()
         }
 
-        private fun resolveHttpSchemeOrHostPort(trimmed: String): String? {
+        private fun resolveBracketedIpv6(trimmed: String): String? {
+            if (trimmed.any { it.isWhitespace() }) return null
+            val m = IPV6_WITH_OPTIONAL_PORT_REGEX.matchEntire(trimmed) ?: return null
+            val addr = m.groupValues[1]
+            if (!addr.contains(':')) return null
+            val portStr = m.groupValues[3]
+            if (portStr.isNotEmpty()) {
+                val port = portStr.toIntOrNull() ?: return null
+                if (port !in 1..65535) return null
+            }
+            return "https://$trimmed"
+        }
+
+        private fun isValidIpv4(host: String): Boolean {
+            val m = IPV4_REGEX.matchEntire(host) ?: return false
+            return (1..4).all { idx ->
+                val octet = m.groupValues[idx].toIntOrNull() ?: return false
+                octet in 0..255
+            }
+        }
+
+        private fun isValidBareDomain(host: String, allowFileLikeTld: Boolean): Boolean {
+            val clean = host.trimEnd('.')
+            if (clean.isEmpty() || !clean.contains('.')) return false
+            val labels = clean.split('.')
+            if (labels.size < 2) return false
+            if (!labels.all { DNS_LABEL_REGEX.matches(it) }) return false
+            val tld = labels.last().lowercase(Locale.ROOT)
+            if (!ALPHA_TLD_REGEX.matches(tld)) return false
+            if (!allowFileLikeTld) {
+                if (tld in NON_URL_FILE_EXTENSIONS) return false
+                if (labels.size == 2 && labels[0].lowercase(Locale.ROOT) in CODE_RECEIVERS && tld !in MAJOR_WEB_TLDS) {
+                    return false
+                }
+            }
+            return true
+        }
+
+        private fun resolveHttpSchemeOrHostPort(trimmed: String, treatCodeLineAsSearch: Boolean = false): String? {
             val schemeMatch = SCHEME_PREFIX_REGEX.matchEntire(trimmed) ?: return null
             val scheme = schemeMatch.groupValues[1].lowercase(Locale.ROOT)
             val rest = schemeMatch.groupValues[2]
             if ((scheme == "http" || scheme == "https") && rest.startsWith("//")) {
                 return if (hasValidHttpAuthority(trimmed)) trimmed else null
             }
-            if (HOST_WITH_PORT_REGEX.matches(trimmed) && !trimmed.any { it.isWhitespace() }) {
+            val hp = HOST_WITH_PORT_REGEX.matchEntire(trimmed) ?: return null
+            if (trimmed.any { it.isWhitespace() }) return null
+            val host = hp.groupValues[1]
+            val port = hp.groupValues[2].toIntOrNull() ?: return null
+            if (port !in 1..65535) return null
+            if (host.equals("localhost", ignoreCase = true) || isValidIpv4(host)) {
                 return "https://$trimmed"
             }
-            return null
+            if (treatCodeLineAsSearch) {
+                val ext = host.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                if (ext in CODE_LINE_FILE_EXTENSIONS && hp.groupValues[3].isEmpty()) return null
+            }
+            return if (isValidBareDomain(host, allowFileLikeTld = !treatCodeLineAsSearch)) {
+                "https://$trimmed"
+            } else {
+                null
+            }
         }
 
         fun normalizeUrl(rawInput: String): String? {
             val trimmed = rawInput.trim()
             if (trimmed.isEmpty()) return null
             if (trimmed.equals("about:blank", ignoreCase = true)) return "about:blank"
+            resolveBracketedIpv6(trimmed)?.let { return it }
             if (SCHEME_PREFIX_REGEX.matchEntire(trimmed) != null) {
                 return resolveHttpSchemeOrHostPort(trimmed)
             }
@@ -653,11 +761,30 @@ class SnakePreferences(context: Context) {
         fun normalizeSearchTemplate(raw: String): String {
             val trimmed = raw.trim()
             if (trimmed.isEmpty()) return ""
+            resolveBracketedIpv6(trimmed)?.let { return it }
             if (SCHEME_PREFIX_REGEX.matchEntire(trimmed) != null) {
                 return resolveHttpSchemeOrHostPort(trimmed).orEmpty()
             }
             if (trimmed.any { it.isWhitespace() }) return ""
             return "https://$trimmed"
+        }
+
+        private fun isCodeLineTokenWithPort(trimmed: String): Boolean {
+            val hp = HOST_WITH_PORT_REGEX.matchEntire(trimmed) ?: return false
+            if (hp.groupValues[3].isNotEmpty()) return false
+            val host = hp.groupValues[1]
+            val ext = host.substringAfterLast('.', "").lowercase(Locale.ROOT)
+            return ext in CODE_LINE_FILE_EXTENSIONS
+        }
+
+        private fun looksLikeBareUrlHost(trimmed: String): Boolean {
+            if (trimmed.any { it.isWhitespace() }) return false
+            val sepIdx = trimmed.indexOfAny(charArrayOf('/', '?', '#'))
+            val hasPathOrQuery = sepIdx >= 0
+            val hostPart = if (hasPathOrQuery) trimmed.substring(0, sepIdx) else trimmed
+            val lowerHost = hostPart.lowercase(Locale.ROOT)
+            if (lowerHost == "localhost" || isValidIpv4(lowerHost)) return true
+            return isValidBareDomain(hostPart, allowFileLikeTld = hasPathOrQuery)
         }
 
         fun buildSearchOrUrl(
@@ -668,16 +795,15 @@ class SnakePreferences(context: Context) {
             val trimmed = rawInput.trim()
             if (trimmed.isEmpty()) return null
             if (trimmed.equals("about:blank", ignoreCase = true)) return "about:blank"
+            resolveBracketedIpv6(trimmed)?.let { return it }
 
             if (SCHEME_PREFIX_REGEX.matchEntire(trimmed) != null) {
-                // Non-http(s) explicit schemes (javascript:, data:, file:, intent:, etc.) are rejected.
-                return resolveHttpSchemeOrHostPort(trimmed)
-            }
-
-            val lower = trimmed.lowercase(Locale.ROOT)
-            val looksLikeHost = !trimmed.any { it.isWhitespace() } &&
-                (trimmed.contains('.') || lower == "localhost" || lower.startsWith("localhost/"))
-            if (looksLikeHost) {
+                // Keep non-http(s) explicit schemes (mailto:, tel:, javascript:, file:, etc.) rejected,
+                // while treating obvious code line references like "main.kt:42" as search queries.
+                if (!isCodeLineTokenWithPort(trimmed)) {
+                    return resolveHttpSchemeOrHostPort(trimmed, treatCodeLineAsSearch = true)
+                }
+            } else if (looksLikeBareUrlHost(trimmed)) {
                 return "https://$trimmed"
             }
             if (engine == SearchEngine.CUSTOM) {

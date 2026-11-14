@@ -61,12 +61,20 @@
     const clearIntervalOrig = G.clearInterval;
     const setTimeoutOrig = G.setTimeout;
     const clearTimeoutOrig = G.clearTimeout;
-    const ael = EventTarget.prototype.addEventListener;
-    const dispatch = EventTarget.prototype.dispatchEvent;
-    const stopImmediate = Event.prototype.stopImmediatePropagation;
-    const origPerfNow = Performance.prototype.now;
-    const origDocHasFocus = Document.prototype.hasFocus;
-    const origUserAgentGetter = gOPD(Navigator.prototype, 'userAgent').get;
+    const EventTargetC = G.EventTarget || EventTarget;
+    const EventTargetP = EventTargetC && EventTargetC.prototype;
+    const EventProtoC = G.Event || Event;
+    const PerfC0 = G.Performance || Performance;
+    const DocC0 = G.Document || Document;
+    const DocP = DocC0 && DocC0.prototype;
+    const NavC0 = G.Navigator || Navigator;
+    const NavP = NavC0 && NavC0.prototype;
+    const ael = EventTargetP.addEventListener;
+    const dispatch = EventTargetP.dispatchEvent;
+    const stopImmediate = EventProtoC.prototype.stopImmediatePropagation;
+    const origPerfNow = PerfC0.prototype.now;
+    const origDocHasFocus = DocP.hasFocus;
+    const origUserAgentGetter = gOPD(NavP, 'userAgent').get;
     const DOMRectC = G.DOMRect;
     const ResponseC = G.Response;
     const RequestC = G.Request;
@@ -245,11 +253,11 @@
 
     // ------------------------------------------------ 1. visibility / focus lock
     if (on('hideVisibilityFocus')) {
-      replaceGetter(Document.prototype, 'hidden', (g, self) => { apply(g, self, []); return false; });
-      replaceGetter(Document.prototype, 'visibilityState', (g, self) => { apply(g, self, []); return 'visible'; });
-      replaceGetter(Document.prototype, 'webkitHidden', (g, self) => { apply(g, self, []); return false; });
-      replaceGetter(Document.prototype, 'webkitVisibilityState', (g, self) => { apply(g, self, []); return 'visible'; });
-      replaceMethod(Document.prototype, 'hasFocus', (orig, self) => { apply(orig, self, []); return true; });
+      replaceGetter(DocP, 'hidden', (g, self) => { apply(g, self, []); return false; });
+      replaceGetter(DocP, 'visibilityState', (g, self) => { apply(g, self, []); return 'visible'; });
+      replaceGetter(DocP, 'webkitHidden', (g, self) => { apply(g, self, []); return false; });
+      replaceGetter(DocP, 'webkitVisibilityState', (g, self) => { apply(g, self, []); return 'visible'; });
+      replaceMethod(DocP, 'hasFocus', (orig, self) => { apply(orig, self, []); return true; });
     }
 
     const realHasFocus = () => apply(origDocHasFocus, G.document, []);
@@ -366,6 +374,53 @@
         replaceGetter(G.Screen.prototype, 'colorDepth', () => 24);
         replaceGetter(G.Screen.prototype, 'pixelDepth', () => 24);
       }
+      if (G.ScreenOrientation && G.ScreenOrientation.prototype) {
+        replaceGetter(G.ScreenOrientation.prototype, 'type', (g, self) => {
+          apply(g, self, []);
+          return 'portrait-primary';
+        });
+        replaceGetter(G.ScreenOrientation.prototype, 'angle', (g, self) => {
+          apply(g, self, []);
+          return 0;
+        });
+      }
+      if (gOPD(G, 'orientation')) {
+        replaceGetter(G, 'orientation', () => 0);
+      }
+      const mmTarget = gOPD(G, 'matchMedia')
+        ? G
+        : (G.Window && G.Window.prototype && gOPD(G.Window.prototype, 'matchMedia') ? G.Window.prototype : null);
+      const orientationMediaRe = /\(\s*orientation\s*:\s*(portrait|landscape)\s*\)/i;
+      if (mmTarget && typeof G.MediaQueryList === 'function' && G.MediaQueryList.prototype) {
+        const mqlMatchMap = new WeakMap();
+        const origMatchesDesc = gOPD(G.MediaQueryList.prototype, 'matches');
+        const origMatchesGet = origMatchesDesc && origMatchesDesc.get;
+        replaceGetter(G.MediaQueryList.prototype, 'matches', (g, self) => {
+          const nativeMatch = apply(g, self, []);
+          return apply(wmHas, mqlMatchMap, [self]) ? apply(wmGet, mqlMatchMap, [self]) : nativeMatch;
+        });
+        replaceMethod(mmTarget, 'matchMedia', (orig, self, args) => {
+          const mql = apply(orig, self, args);
+          const q = args && args.length > 0 ? String(args[0]) : '';
+          if (mql && orientationMediaRe.test(q)) {
+            const rewritten = q
+              .replace(/\(\s*orientation\s*:\s*portrait\s*\)/gi, '(min-width: 0px)')
+              .replace(/\(\s*orientation\s*:\s*landscape\s*\)/gi, '(min-width: 999999px)');
+            let forcedMatch = false;
+            try {
+              const probeMql = apply(orig, self, [rewritten]);
+              forcedMatch = !!(origMatchesGet ? apply(origMatchesGet, probeMql, []) : probeMql.matches);
+            } catch (e) {
+              forcedMatch = !/\(\s*orientation\s*:\s*landscape\s*\)/i.test(q);
+            }
+            apply(wmSet, mqlMatchMap, [mql, forcedMatch]);
+            try {
+              apply(ael, mql, ['change', (e) => { if (e.isTrusted) apply(stopImmediate, e, []); }, true]);
+            } catch (e) { /* ignore */ }
+          }
+          return mql;
+        });
+      }
     }
 
     // ----------------------------------------- 1b. Navigator & environment leaks
@@ -388,16 +443,16 @@
     const SPOOFED_CORES = (siteSeed & 1) === 0 ? 4 : 8;
     const SPOOFED_MEMORY = (siteSeed & 2) === 0 ? 4 : 8;
 
-    replaceGetter(Navigator.prototype, 'userAgent', (g, self) => { apply(g, self, []); return UNIFIED_UA; });
-    replaceGetter(Navigator.prototype, 'appVersion', (g, self) => { apply(g, self, []); return UNIFIED_APP_VERSION; });
-    replaceGetter(Navigator.prototype, 'platform', (g, self) => { apply(g, self, []); return 'Linux armv8l'; });
-    if (gOPD(Navigator.prototype, 'hardwareConcurrency')) {
-      replaceGetter(Navigator.prototype, 'hardwareConcurrency', (g, self) => { apply(g, self, []); return SPOOFED_CORES; });
+    replaceGetter(NavP, 'userAgent', (g, self) => { apply(g, self, []); return UNIFIED_UA; });
+    replaceGetter(NavP, 'appVersion', (g, self) => { apply(g, self, []); return UNIFIED_APP_VERSION; });
+    replaceGetter(NavP, 'platform', (g, self) => { apply(g, self, []); return 'Linux armv8l'; });
+    if (gOPD(NavP, 'hardwareConcurrency')) {
+      replaceGetter(NavP, 'hardwareConcurrency', (g, self) => { apply(g, self, []); return SPOOFED_CORES; });
     }
-    if (gOPD(Navigator.prototype, 'deviceMemory')) {
-      replaceGetter(Navigator.prototype, 'deviceMemory', (g, self) => { apply(g, self, []); return SPOOFED_MEMORY; });
+    if (gOPD(NavP, 'deviceMemory')) {
+      replaceGetter(NavP, 'deviceMemory', (g, self) => { apply(g, self, []); return SPOOFED_MEMORY; });
     }
-    if (gOPD(Navigator.prototype, 'connection')) {
+    if (gOPD(NavP, 'connection')) {
       const fakeConn = O.freeze({
         effectiveType: '4g',
         rtt: 50,
@@ -406,9 +461,9 @@
         addEventListener: maskAs(() => {}, 'addEventListener'),
         removeEventListener: maskAs(() => {}, 'removeEventListener'),
       });
-      replaceGetter(Navigator.prototype, 'connection', (g, self) => { apply(g, self, []); return fakeConn; });
+      replaceGetter(NavP, 'connection', (g, self) => { apply(g, self, []); return fakeConn; });
     }
-    if (gOPD(Navigator.prototype, 'userAgentData')) {
+    if (gOPD(NavP, 'userAgentData')) {
       const brands = UA_BRANDS;
       const fullList = O.freeze([
         O.freeze({ brand: 'Chromium', version: CHROME_FULL_VERSION }),
@@ -436,10 +491,10 @@
         getHighEntropyValues,
         toJSON: maskAs(() => ({ brands, mobile: true, platform: 'Android' }), 'toJSON'),
       });
-      replaceGetter(Navigator.prototype, 'userAgentData', (g, self) => { apply(g, self, []); return fakeUAData; });
+      replaceGetter(NavP, 'userAgentData', (g, self) => { apply(g, self, []); return fakeUAData; });
     }
-    if (gOPD(Navigator.prototype, 'serviceWorker')) {
-      replaceGetter(Navigator.prototype, 'serviceWorker', (g, self) => {
+    if (gOPD(NavP, 'serviceWorker')) {
+      replaceGetter(NavP, 'serviceWorker', (g, self) => {
         apply(g, self, []);
         return undefined;
       });
@@ -709,12 +764,17 @@
         }
       }
 
-      const origGetImageData2D = CanvasRenderingContext2D.prototype.getImageData;
-      const origPutImageData2D = CanvasRenderingContext2D.prototype.putImageData;
-      const origDrawImage2D = CanvasRenderingContext2D.prototype.drawImage;
-      const origCreateElement = Document.prototype.createElement;
-      const origGetContext = HTMLCanvasElement.prototype.getContext;
-      const canvasWidthDesc = gOPD(HTMLCanvasElement.prototype, 'width');
+      const Ctx2DC = G.CanvasRenderingContext2D || CanvasRenderingContext2D;
+      const HtmlCanvasC = G.HTMLCanvasElement || HTMLCanvasElement;
+      const OffCtx2DC = G.OffscreenCanvasRenderingContext2D || (typeof OffscreenCanvasRenderingContext2D === 'function' ? OffscreenCanvasRenderingContext2D : null);
+      const OffCanvasC = G.OffscreenCanvas || (typeof OffscreenCanvas === 'function' ? OffscreenCanvas : null);
+      const TextMetricsC = G.TextMetrics || (typeof TextMetrics === 'function' ? TextMetrics : null);
+      const origGetImageData2D = Ctx2DC.prototype.getImageData;
+      const origPutImageData2D = Ctx2DC.prototype.putImageData;
+      const origDrawImage2D = Ctx2DC.prototype.drawImage;
+      const origCreateElement = DocP.createElement;
+      const origGetContext = HtmlCanvasC.prototype.getContext;
+      const canvasWidthDesc = gOPD(HtmlCanvasC.prototype, 'width');
       const origCanvasWidthGet = canvasWidthDesc && canvasWidthDesc.get;
 
       function noiseImageData(imageData, sx, sy) {
@@ -751,19 +811,19 @@
         return apply(orig, copy === null ? self : copy, args);
       }
 
-      replaceMethod(CanvasRenderingContext2D.prototype, 'getImageData', (orig, self, args) =>
+      replaceMethod(Ctx2DC.prototype, 'getImageData', (orig, self, args) =>
         noiseImageData(apply(orig, self, args), args[0], args[1]));
-      if (typeof OffscreenCanvasRenderingContext2D === 'function') {
-        replaceMethod(OffscreenCanvasRenderingContext2D.prototype, 'getImageData', (orig, self, args) =>
+      if (OffCtx2DC) {
+        replaceMethod(OffCtx2DC.prototype, 'getImageData', (orig, self, args) =>
           noiseImageData(apply(orig, self, args), args[0], args[1]));
       }
-      replaceMethod(HTMLCanvasElement.prototype, 'toDataURL', withNoisedHtmlCanvas);
-      replaceMethod(HTMLCanvasElement.prototype, 'toBlob', withNoisedHtmlCanvas);
+      replaceMethod(HtmlCanvasC.prototype, 'toDataURL', withNoisedHtmlCanvas);
+      replaceMethod(HtmlCanvasC.prototype, 'toBlob', withNoisedHtmlCanvas);
 
       // TextMetrics.width: slight deterministic perturbation keyed on siteSeed + text.
-      if (typeof TextMetrics === 'function' && CanvasRenderingContext2D.prototype.measureText) {
+      if (TextMetricsC && Ctx2DC.prototype.measureText) {
         const noisedTextWidths = new WeakMap();
-        replaceMethod(CanvasRenderingContext2D.prototype, 'measureText', (orig, self, args) => {
+        replaceMethod(Ctx2DC.prototype, 'measureText', (orig, self, args) => {
           const metrics = apply(orig, self, args);
           const text = args.length > 0 ? String(args[0]) : '';
           if (text.length === 0 || !metrics) return metrics;
@@ -775,26 +835,26 @@
           apply(wmSet, noisedTextWidths, [metrics, delta]);
           return metrics;
         });
-        replaceGetter(TextMetrics.prototype, 'width', (g, self) => {
+        replaceGetter(TextMetricsC.prototype, 'width', (g, self) => {
           const w = apply(g, self, []);
           const delta = apply(wmGet, noisedTextWidths, [self]);
           return delta !== undefined ? w + delta : w;
         });
       }
 
-      if (typeof OffscreenCanvas === 'function') {
-        const OffCtxP = typeof OffscreenCanvasRenderingContext2D === 'function' ? OffscreenCanvasRenderingContext2D.prototype : null;
-        const origOffGetContext = OffscreenCanvas.prototype.getContext;
+      if (OffCanvasC) {
+        const OffCtxP = OffCtx2DC ? OffCtx2DC.prototype : null;
+        const origOffGetContext = OffCanvasC.prototype.getContext;
         const origOffGetImageData = OffCtxP && OffCtxP.getImageData;
         const origOffPutImageData = OffCtxP && OffCtxP.putImageData;
         const origOffDrawImage = OffCtxP && OffCtxP.drawImage;
-        replaceMethod(OffscreenCanvas.prototype, 'convertToBlob', (orig, self, args) => {
+        replaceMethod(OffCanvasC.prototype, 'convertToBlob', (orig, self, args) => {
           const w = self.width;
           const h = self.height;
           if (w === 0 || h === 0 || !origOffGetImageData) return apply(orig, self, args);
           let copy;
           try {
-            copy = new OffscreenCanvas(w, h);
+            copy = new OffCanvasC(w, h);
             const ctx = apply(origOffGetContext, copy, ['2d']);
             apply(origOffDrawImage, ctx, [self, 0, 0]);
             const data = apply(origOffGetImageData, ctx, [0, 0, w, h]);
@@ -844,8 +904,10 @@
           return apply(orig, self, args);
         });
       }
-      if (typeof WebGLRenderingContext === 'function') patchWebGL(WebGLRenderingContext.prototype);
-      if (typeof WebGL2RenderingContext === 'function') patchWebGL(WebGL2RenderingContext.prototype);
+      const WGL1C = G.WebGLRenderingContext || (typeof WebGLRenderingContext === 'function' ? WebGLRenderingContext : null);
+      const WGL2C = G.WebGL2RenderingContext || (typeof WebGL2RenderingContext === 'function' ? WebGL2RenderingContext : null);
+      if (WGL1C) patchWebGL(WGL1C.prototype);
+      if (WGL2C) patchWebGL(WGL2C.prototype);
     }
 
     // WebAudio: noise is a pure function of (channel, sample index) so any slice is consistent.
@@ -869,7 +931,9 @@
         if (!s) { s = new Set(); apply(wmSet, noisedChannels, [buffer, s]); }
         return s;
       }
-      replaceMethod(AudioBuffer.prototype, 'getChannelData', (orig, self, args) => {
+      const AudioBufC = G.AudioBuffer || AudioBuffer;
+      const AnalyserC = G.AnalyserNode || (typeof AnalyserNode === 'function' ? AnalyserNode : null);
+      replaceMethod(AudioBufC.prototype, 'getChannelData', (orig, self, args) => {
         const data = apply(orig, self, args);
         const channel = args[0] >>> 0;
         const done = channelSet(self);
@@ -879,7 +943,7 @@
         }
         return data;
       });
-      replaceMethod(AudioBuffer.prototype, 'copyFromChannel', (orig, self, args) => {
+      replaceMethod(AudioBufC.prototype, 'copyFromChannel', (orig, self, args) => {
         const result = apply(orig, self, args);
         const dest = args[0];
         const channel = args[1] >>> 0;
@@ -890,7 +954,7 @@
         }
         return result;
       });
-      if (typeof AnalyserNode === 'function') {
+      if (AnalyserC) {
         function isSilentUniform(arr) {
           if (!arr || arr.length === 0) return true;
           const first = arr[0];
@@ -900,7 +964,7 @@
           return true;
         }
         for (const key of ['getFloatFrequencyData', 'getFloatTimeDomainData']) {
-          replaceMethod(AnalyserNode.prototype, key, (orig, self, args) => {
+          replaceMethod(AnalyserC.prototype, key, (orig, self, args) => {
             const result = apply(orig, self, args);
             const arr = args[0];
             if (typedTag(arr) === 'Float32Array' && !isSilentUniform(arr)) {
@@ -910,7 +974,7 @@
           });
         }
         for (const key of ['getByteFrequencyData', 'getByteTimeDomainData']) {
-          replaceMethod(AnalyserNode.prototype, key, (orig, self, args) => {
+          replaceMethod(AnalyserC.prototype, key, (orig, self, args) => {
             const result = apply(orig, self, args);
             const arr = args[0];
             if (typedTag(arr) === 'Uint8Array' && !isSilentUniform(arr)) {
@@ -970,15 +1034,18 @@
         }
         return out;
       }
-      replaceMethod(Element.prototype, 'getBoundingClientRect', (orig, self, args) => jitterRect(apply(orig, self, args)));
-      replaceMethod(Range.prototype, 'getBoundingClientRect', (orig, self, args) => jitterRect(apply(orig, self, args)));
-      replaceMethod(Element.prototype, 'getClientRects', (orig, self, args) => jitterRectList(apply(orig, self, args)));
-      replaceMethod(Range.prototype, 'getClientRects', (orig, self, args) => jitterRectList(apply(orig, self, args)));
+      const ElemC = G.Element || Element;
+      const RangeC = G.Range || Range;
+      replaceMethod(ElemC.prototype, 'getBoundingClientRect', (orig, self, args) => jitterRect(apply(orig, self, args)));
+      replaceMethod(RangeC.prototype, 'getBoundingClientRect', (orig, self, args) => jitterRect(apply(orig, self, args)));
+      replaceMethod(ElemC.prototype, 'getClientRects', (orig, self, args) => jitterRectList(apply(orig, self, args)));
+      replaceMethod(RangeC.prototype, 'getClientRects', (orig, self, args) => jitterRectList(apply(orig, self, args)));
     }
 
     // Media devices: one entry per kind, hiding device counts.
-    if (typeof MediaDevices === 'function') {
-      replaceMethod(MediaDevices.prototype, 'enumerateDevices', (orig, self, args) =>
+    const MediaDevicesC = G.MediaDevices || (typeof MediaDevices === 'function' ? MediaDevices : null);
+    if (MediaDevicesC) {
+      replaceMethod(MediaDevicesC.prototype, 'enumerateDevices', (orig, self, args) =>
         apply(promiseThen, apply(orig, self, args), [(list) => {
           const seen = new Set();
           return list.filter((d) => (seen.has(d.kind) ? false : (seen.add(d.kind), true)));
@@ -1165,7 +1232,7 @@
     function isValidListener(fn) {
       return typeof fn === 'function' || (fn !== null && typeof fn === 'object' && typeof fn.handleEvent === 'function');
     }
-    replaceMethod(EventTarget.prototype, 'addEventListener', (orig, self, args) => {
+    replaceMethod(EventTargetP, 'addEventListener', (orig, self, args) => {
       // Bare addEventListener(...) passes undefined as `this`, which WebIDL coerces to window.
       if ((self === G || self == null) && (args[0] === 'devicemotion' || args[0] === 'deviceorientation') && isValidListener(args[1])) {
         const st = ensureMotionWatch(args[0]);
@@ -1191,7 +1258,7 @@
       }
       return apply(orig, self, args);
     });
-    replaceMethod(EventTarget.prototype, 'removeEventListener', (orig, self, args) => {
+    replaceMethod(EventTargetP, 'removeEventListener', (orig, self, args) => {
       if ((self === G || self == null) && (args[0] === 'devicemotion' || args[0] === 'deviceorientation') && motionWatch[args[0]]) {
         const st = motionWatch[args[0]];
         (isCaptureOpt(args[2]) ? st.capture : st.bubble).delete(args[1]);
@@ -1246,7 +1313,7 @@
     }
 
     if (on('blockBeacons')) {
-      replaceMethod(Navigator.prototype, 'sendBeacon', (orig, self, args) => {
+      replaceMethod(NavP, 'sendBeacon', (orig, self, args) => {
         navigatorBrandCheck(self);
         if (args.length < 1) {
           throw new TypeError("Failed to execute 'sendBeacon' on 'Navigator': 1 argument required, but only 0 present.");
@@ -1718,6 +1785,16 @@
         const doc = apply(g, self, []);
         if (doc && doc.defaultView) ensureInstalled(doc.defaultView);
         return doc;
+      });
+    }
+    const openTarget = gOPD(G, 'open')
+      ? G
+      : (G.Window && G.Window.prototype && gOPD(G.Window.prototype, 'open') ? G.Window.prototype : null);
+    if (openTarget) {
+      replaceMethod(openTarget, 'open', (orig, self, args) => {
+        const win = apply(orig, self, args);
+        if (win) ensureInstalled(win);
+        return win;
       });
     }
     // Observe the Document itself: `documentElement` is still null at document_start, which made the

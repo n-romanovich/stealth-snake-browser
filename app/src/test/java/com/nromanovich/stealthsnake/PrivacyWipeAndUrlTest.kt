@@ -80,5 +80,34 @@ class PrivacyWipeAndUrlTest {
             "https://example.org:8443/app",
             SnakePreferences.buildSearchOrUrl("example.org:8443/app", SearchEngine.OFF)
         )
+        assertEquals(
+            "https://[::1]:8080/api",
+            SnakePreferences.buildSearchOrUrl("[::1]:8080/api", SearchEngine.OFF)
+        )
+        assertEquals(
+            "https://1.1.1.1",
+            SnakePreferences.buildSearchOrUrl("1.1.1.1", SearchEngine.DUCKDUCKGO)
+        )
+        // Dotted code/version/file tokens without explicit scheme or path go to Search, not https://
+        assertEquals(
+            "https://duckduckgo.com/?q=node.js",
+            SnakePreferences.buildSearchOrUrl("node.js", SearchEngine.DUCKDUCKGO)
+        )
+        assertEquals(
+            "https://duckduckgo.com/?q=v2.0.1",
+            SnakePreferences.buildSearchOrUrl("v2.0.1", SearchEngine.DUCKDUCKGO)
+        )
+        assertEquals(
+            "https://duckduckgo.com/?q=main.kt",
+            SnakePreferences.buildSearchOrUrl("main.kt", SearchEngine.DUCKDUCKGO)
+        )
+        assertEquals(
+            "https://duckduckgo.com/?q=os.path",
+            SnakePreferences.buildSearchOrUrl("os.path", SearchEngine.DUCKDUCKGO)
+        )
+        assertEquals(
+            "https://duckduckgo.com/?q=main.kt%3A42",
+            SnakePreferences.buildSearchOrUrl("main.kt:42", SearchEngine.DUCKDUCKGO)
+        )
     }
 }

@@ -282,8 +282,8 @@
 
     <string name="fix_webrtc_title">Video/voice calls, screen share, or P2P transfers fail</string>
     <string name="fix_webrtc_symptoms">Google Meet, Zoom Web, Discord, or Jitsi cannot connect audio/video; Snapdrop/ShareDrop peers are invisible; microphone/camera stream stalls.</string>
-    <string name="fix_webrtc_cause">Blocking WebRTC local ICE candidates prevents RTCPeerConnection from discovering local/VPN network interfaces and negotiating direct media streams.</string>
-    <string name="fix_webrtc_fix">Settings → Network → turn off "Block WebRTC local ICE candidates" (best done in a dedicated "Calls" custom profile).</string>
+    <string name="fix_webrtc_cause">Blocking WebRTC local ICE candidates prevents RTCPeerConnection from discovering local/VPN interfaces. In addition, Stealth Snake intentionally declares zero CAMERA or RECORD_AUDIO Android manifest permissions, so hardware mic and camera capture remain unavailable at the OS sandbox level.</string>
+    <string name="fix_webrtc_fix">For text chat, screen/tab sharing, or receiving calls: Settings → Network → turn off "Block WebRTC local ICE candidates" (best done in a dedicated "Calls" session profile). Hardware camera/microphone calls require a dedicated app because Stealth Snake stays zero-permission.</string>
 
     <string name="fix_blocklist_title">Payments, OAuth logins, or embedded widgets do not load</string>
     <string name="fix_blocklist_symptoms">"Sign in with Google/GitHub", Stripe/PayPal checkout, comment widgets, or embedded video players stay blank or hang endlessly.</string>
@@ -498,4 +498,49 @@
     <string name="download_confirm_action">Download</string>
     <string name="status_capture_gallery_requires_q">Gallery export requires Android 10 or newer</string>
     <string name="site_info_snake_script_unsupported">Anti-fingerprinting scripts inactive (WebView lacks DOCUMENT_START_SCRIPT support)</string>
+
+    <!-- Compatibility toggles, popups, uploads, errors, auth, bookmarks & UX controls -->
+    <string name="pref_allow_file_uploads">Allow sanitized file uploads</string>
+    <string name="pref_allow_file_uploads_desc">Allow &lt;input type="file"&gt; pickers via a private temporary copy (EXIF stripped from images, direct content:// URIs never exposed).</string>
+    <string name="pref_allow_oauth_popups">Allow modal login popups (OAuth / 3DS)</string>
+    <string name="pref_allow_oauth_popups_desc">Allow user-tapped window.open popups in an isolated modal child WebView carrying the current session protections. Disabled in Max Stealth.</string>
+    <string name="downloads_open_warning_title">Open downloaded file in external app?</string>
+    <string name="downloads_open_warning_message">File \"%1$s\" will be opened via a third-party app outside Stealth Snake\'s isolated sandbox. Verify you trust this file before opening.</string>
+    <string name="downloads_open_failed">No compatible app found to open this file</string>
+    <string name="popup_blocked_notice">Popup blocked — enable Login Popups in Compatibility / Settings if needed for OAuth or 3DS</string>
+    <string name="popup_window_title">Popup · %1$s</string>
+    <string name="popup_window_close">Close popup</string>
+    <string name="file_upload_sanitize_failed">Failed to prepare file safely for upload</string>
+    <string name="file_upload_too_large">Selected file exceeds the 50 MB sanitized upload limit</string>
+    <string name="error_page_title">Page could not load</string>
+    <string name="error_page_message">%1$s (%2$d)</string>
+    <string name="error_page_retry">Retry</string>
+    <string name="http_auth_title">Authentication required</string>
+    <string name="http_auth_message">Site \"%1$s\" requests HTTP credentials (%2$s). Credentials stay in memory only for this session.</string>
+    <string name="http_auth_username">Username</string>
+    <string name="http_auth_password">Password</string>
+    <string name="http_auth_signin">Sign in</string>
+    <string name="context_open_new_session">Open in new isolated session</string>
+    <string name="context_copy_link">Copy link address</string>
+    <string name="context_download_link">Download link</string>
+    <string name="context_download_image">Download image</string>
+    <string name="menu_bookmarks">Bookmarks</string>
+    <string name="menu_bookmark_add">Bookmark page</string>
+    <string name="menu_bookmark_remove">Remove bookmark</string>
+    <string name="menu_share_url">Share URL</string>
+    <string name="menu_print_pdf">Print / Save as PDF</string>
+    <string name="menu_clear_site_data">Clear site data</string>
+    <string name="bookmark_added">Bookmark saved (encrypted locally)</string>
+    <string name="bookmark_removed">Bookmark removed</string>
+    <string name="bookmarks_title">Encrypted Bookmarks</string>
+    <string name="bookmarks_empty">No bookmarks saved yet.</string>
+    <string name="bookmark_delete_desc">Delete bookmark</string>
+    <string name="site_data_cleared">Cleared cookies &amp; storage for %1$s</string>
+    <string name="print_job_name">Stealth Snake Page</string>
+    <string name="print_unavailable">Printing unavailable on this page</string>
+    <string name="session_profile_label">Session protection profile</string>
+    <string name="session_profile_default">Global default (%1$s)</string>
+    <string name="session_profile_switched">Session switched to %1$s (isolated &amp; re-seeded)</string>
+    <string name="fullscreen_rotate_desc">Rotate fullscreen video</string>
+    <string name="external_link_opened_new_session">Opened external link in a new isolated session</string>
 </resources>

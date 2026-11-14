@@ -89,4 +89,14 @@ class SiteFixGuideTest {
         val spans = (highlighted as Spanned).getSpans(0, highlighted.length, BackgroundColorSpan::class.java)
         assertFalse(spans.isEmpty())
     }
+
+    @Test
+    fun `webrtc guide clarifies zero-permission mic and camera design`() {
+        val entry = SiteFixGuide.entries.first { it.id == "webrtc_calls" }
+        val cause = ctx.getString(entry.causeRes)
+        val fix = ctx.getString(entry.fixPathRes)
+        assertTrue(cause.contains("CAMERA"))
+        assertTrue(cause.contains("RECORD_AUDIO"))
+        assertTrue(fix.contains("zero-permission", ignoreCase = true) || cause.contains("sandbox", ignoreCase = true))
+    }
 }

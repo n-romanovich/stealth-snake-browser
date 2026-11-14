@@ -103,6 +103,9 @@ const SHAPE_PROBE = `(() => {
     ['window', 'outerWidth'], ['window', 'outerHeight'],
     ['VisualViewport.prototype', 'width'], ['VisualViewport.prototype', 'height'], ['VisualViewport.prototype', 'scale'],
     ['window', 'ondevicemotion'], ['window', 'ondeviceorientation'],
+    ['window', 'matchMedia'], ['window', 'open'],
+    ['ScreenOrientation.prototype', 'type'], ['ScreenOrientation.prototype', 'angle'],
+    ['MediaQueryList.prototype', 'matches'],
   ];
   const out = {};
   for (const [objExpr, key] of targets) {
@@ -999,4 +1002,72 @@ test('Same-origin iframe is patched synchronously via window.frames and handles 
   assert.equal(res.tzHours, 10);
   assert.equal(res.keepaliveStatus, 200);
   assert.ok(res.workerUa.includes('Android 10; K'));
+});
+
+test('ScreenOrientation and matchMedia orientation queries stay locked to portrait while lockViewport is enabled', async () => {
+  const s = await snake(SEED_A);
+  const r = JSON.parse(await s.eval(`(() => {
+    let typeIllegal = false;
+    try { Object.getOwnPropertyDescriptor(ScreenOrientation.prototype, 'type').get.call({}); } catch (e) { typeIllegal = e instanceof TypeError; }
+    let matchesIllegal = false;
+    try { Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches').get.call({}); } catch (e) { matchesIllegal = e instanceof TypeError; }
+    const pMql = matchMedia('(orientation: portrait)');
+    const lMql = matchMedia('(orientation: landscape)');
+    const screenPortrait = matchMedia('screen and (orientation: portrait)');
+    const comboLandscape = matchMedia('(orientation: landscape) and (min-width: 1px)');
+    return JSON.stringify({
+      type: screen.orientation.type,
+      angle: screen.orientation.angle,
+      typeIllegal,
+      matchesIllegal,
+      portraitMatch: pMql.matches,
+      portraitMedia: pMql.media,
+      landscapeMatch: lMql.matches,
+      landscapeMedia: lMql.media,
+      screenPortrait: screenPortrait.matches,
+      comboLandscape: comboLandscape.matches,
+    });
+  })()`));
+  assert.equal(r.type, 'portrait-primary');
+  assert.equal(r.angle, 0);
+  assert.equal(r.typeIllegal, true);
+  assert.equal(r.matchesIllegal, true);
+  assert.equal(r.portraitMatch, true);
+  assert.equal(r.portraitMedia, '(orientation: portrait)');
+  assert.equal(r.landscapeMatch, false);
+  assert.equal(r.landscapeMedia, '(orientation: landscape)');
+  assert.equal(r.screenPortrait, true);
+  assert.equal(r.comboLandscape, false);
+
+  const unlocked = await open(buildScript(SEED_A, readBlocklistRules(), { lockViewport: false }));
+  const u = JSON.parse(await unlocked.eval(`JSON.stringify({
+    portrait: matchMedia('(orientation: portrait)').matches,
+    landscape: matchMedia('(orientation: landscape)').matches,
+    typeStr: Function.prototype.toString.call(Object.getOwnPropertyDescriptor(ScreenOrientation.prototype, 'type').get),
+  })`));
+  assert.equal(u.landscape, true);
+  assert.equal(u.portrait, false);
+  assert.match(u.typeStr, /\[native code\]/);
+});
+
+test('window.open synchronously patches same-origin child windows', async () => {
+  const s = await snake(SEED_A);
+  const evalRes = await s.send('Runtime.evaluate', {
+    expression: `(() => {
+      const child = window.open('${main.origin}/child', '_blank', 'width=400,height=400');
+      if (!child) return JSON.stringify({ opened: false });
+      const ua = child.navigator.userAgent;
+      const tz = new child.Date().getTimezoneOffset();
+      const marked = Reflect.ownKeys(child).some((k) => typeof k === 'symbol' && Symbol.keyFor(k) === 'ss.i');
+      child.close();
+      return JSON.stringify({ opened: true, ua, tz, marked });
+    })()`,
+    returnByValue: true,
+    userGesture: true,
+  });
+  const r = JSON.parse(evalRes.result.value);
+  assert.equal(r.opened, true);
+  assert.ok(r.ua.includes('Android 10; K'));
+  assert.equal(r.tz, 0);
+  assert.equal(r.marked, true);
 });

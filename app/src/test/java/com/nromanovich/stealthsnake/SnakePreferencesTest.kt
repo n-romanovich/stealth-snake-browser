@@ -31,13 +31,26 @@ class SnakePreferencesTest {
         assertEquals(CaptureMode.ASK, prefs.captureMode)
         assertTrue(prefs.noiseCanvasWebgl)
         assertTrue(prefs.microJitterEnabled)
+        assertTrue(prefs.lockViewport)
+        assertFalse(prefs.allowFileUploads)
+        assertFalse(prefs.allowOAuthPopups)
 
         prefs.applyPreset(ProtectionPreset.COMPATIBILITY)
         assertEquals(ProtectionPreset.COMPATIBILITY, prefs.preset)
         assertFalse(prefs.noiseCanvasWebgl)
         assertFalse(prefs.noiseAudio)
         assertFalse(prefs.microJitterEnabled)
+        assertFalse(prefs.lockViewport)
+        assertTrue(prefs.allowFileUploads)
+        assertTrue(prefs.allowOAuthPopups)
         assertTrue(prefs.builtinBlocklistEnabled)
+
+        val compatProfile = prefs.createProfileFromCurrent("CompatSnap")
+        assertFalse(compatProfile.lockViewport)
+        assertTrue(compatProfile.allowFileUploads)
+        assertTrue(compatProfile.allowOAuthPopups)
+        val roundTripped = SnakeProfile.fromJson(compatProfile.toJson())!!
+        assertEquals(compatProfile, roundTripped)
 
         prefs.noiseCanvasWebgl = true
         assertEquals(ProtectionPreset.CUSTOM, prefs.preset)
@@ -45,6 +58,9 @@ class SnakePreferencesTest {
         prefs.resetToDefaults()
         assertEquals(ProtectionPreset.MAX_STEALTH, prefs.preset)
         assertTrue(prefs.noiseCanvasWebgl)
+        assertTrue(prefs.lockViewport)
+        assertFalse(prefs.allowFileUploads)
+        assertFalse(prefs.allowOAuthPopups)
     }
 
     @Test

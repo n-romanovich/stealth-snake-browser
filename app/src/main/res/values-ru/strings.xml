@@ -284,8 +284,8 @@
 
     <string name="fix_webrtc_title">Не работают видеозвонки, голос, показ экрана или P2P</string>
     <string name="fix_webrtc_symptoms">В Google Meet, Zoom, Discord или Jitsi не подключается звук/видео; сервисы вроде Snapdrop не видят устройства в сети; поток с камеры или микрофона зависает.</string>
-    <string name="fix_webrtc_cause">Блокировка локальных ICE-кандидатов WebRTC не даёт RTCPeerConnection обнаружить сетевые интерфейсы и согласовать прямое медиасоединение.</string>
-    <string name="fix_webrtc_fix">Настройки → Сеть → выключите «Блокировать локальные ICE WebRTC» (удобно вынести в отдельный профиль «Звонки»).</string>
+    <string name="fix_webrtc_cause">Блокировка локальных ICE-кандидатов WebRTC не даёт RTCPeerConnection обнаружить сетевые интерфейсы. Кроме того, в манифесте Stealth Snake намеренно отсутствуют разрешения CAMERA и RECORD_AUDIO (архитектура нулевых разрешений), поэтому доступ к микрофону и камере заблокирован на уровне песочницы ОС.</string>
+    <string name="fix_webrtc_fix">Для текстового чата, демонстрации экрана/вкладки или приёма входящего потока: Настройки → Сеть → выключите «Блокировать локальные ICE WebRTC» (удобно вынести в профиль сессии «Звонки»). Для звонков с аппаратной камеры/микрофона нужен отдельный клиент, так как браузер не запрашивает эти разрешения.</string>
 
     <string name="fix_blocklist_title">Не грузится оплата, вход через OAuth или встроенные виджеты</string>
     <string name="fix_blocklist_symptoms">Кнопки «Войти через Google/GitHub», оплата Stripe/PayPal, виджеты комментариев или встроенные плееры остаются пустыми или бесконечно крутятся.</string>
@@ -500,4 +500,49 @@
     <string name="download_confirm_action">Скачать</string>
     <string name="status_capture_gallery_requires_q">Экспорт в галерею требует Android 10 или новее</string>
     <string name="site_info_snake_script_unsupported">Защита от фингерпринтинга неактивна (WebView не поддерживает DOCUMENT_START_SCRIPT)</string>
+
+    <!-- Compatibility toggles, popups, uploads, errors, auth, bookmarks & UX controls -->
+    <string name="pref_allow_file_uploads">Разрешить очищенную отправку файлов</string>
+    <string name="pref_allow_file_uploads_desc">Разрешить выбор файлов в формах через временную копию без EXIF-метаданных и без прямого доступа к content:// URI.</string>
+    <string name="pref_allow_oauth_popups">Разрешить модальные окна входа (OAuth / 3DS)</string>
+    <string name="pref_allow_oauth_popups_desc">Разрешать вызванные нажатием пользователя popup-окна window.open в изолированном дочернем окне с защитой текущей сессии. В Max Stealth отключено.</string>
+    <string name="downloads_open_warning_title">Открыть файл во внешнем приложении?</string>
+    <string name="downloads_open_warning_message">Файл «%1$s» будет открыт сторонним приложением вне изолированной песочницы Stealth Snake. Открывайте только доверенные файлы.</string>
+    <string name="downloads_open_failed">Не найдено приложение для открытия этого файла</string>
+    <string name="popup_blocked_notice">Всплывающее окно заблокировано — включите popup-окна входа в Настройках при необходимости для OAuth или 3DS</string>
+    <string name="popup_window_title">Окно входа · %1$s</string>
+    <string name="popup_window_close">Закрыть окно</string>
+    <string name="file_upload_sanitize_failed">Не удалось безопасно подготовить файл к отправке</string>
+    <string name="file_upload_too_large">Выбранный файл превышает лимит безопасной загрузки 50 МБ</string>
+    <string name="error_page_title">Не удалось загрузить страницу</string>
+    <string name="error_page_message">%1$s (%2$d)</string>
+    <string name="error_page_retry">Повторить</string>
+    <string name="http_auth_title">Требуется авторизация</string>
+    <string name="http_auth_message">Сайт «%1$s» запрашивает HTTP-учётные данные (%2$s). Пароль хранится только в оперативной памяти этой сессии.</string>
+    <string name="http_auth_username">Логин</string>
+    <string name="http_auth_password">Пароль</string>
+    <string name="http_auth_signin">Войти</string>
+    <string name="context_open_new_session">Открыть в новой изолированной сессии</string>
+    <string name="context_copy_link">Копировать адрес ссылки</string>
+    <string name="context_download_link">Скачать ссылку</string>
+    <string name="context_download_image">Скачать изображение</string>
+    <string name="menu_bookmarks">Закладки</string>
+    <string name="menu_bookmark_add">Добавить в закладки</string>
+    <string name="menu_bookmark_remove">Удалить из закладок</string>
+    <string name="menu_share_url">Поделиться ссылкой</string>
+    <string name="menu_print_pdf">Печать / Сохранить как PDF</string>
+    <string name="menu_clear_site_data">Очистить данные сайта</string>
+    <string name="bookmark_added">Закладка сохранена локально (зашифровано)</string>
+    <string name="bookmark_removed">Закладка удалена</string>
+    <string name="bookmarks_title">Зашифрованные закладки</string>
+    <string name="bookmarks_empty">Закладок пока нет.</string>
+    <string name="bookmark_delete_desc">Удалить закладку</string>
+    <string name="site_data_cleared">Данные и cookie для %1$s очищены</string>
+    <string name="print_job_name">Страница Stealth Snake</string>
+    <string name="print_unavailable">Печать недоступна на этой странице</string>
+    <string name="session_profile_label">Профиль защиты сессии</string>
+    <string name="session_profile_default">По умолчанию (%1$s)</string>
+    <string name="session_profile_switched">Сессия переключена на %1$s (изоляция и новый seed)</string>
+    <string name="fullscreen_rotate_desc">Повернуть видео</string>
+    <string name="external_link_opened_new_session">Внешняя ссылка открыта в новой изолированной сессии</string>
 </resources>
