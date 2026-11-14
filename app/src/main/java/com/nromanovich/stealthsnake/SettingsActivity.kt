@@ -1203,6 +1203,8 @@ class SettingsActivity : AppCompatActivity() {
             val behGroup = createCardGroup(section)
             val visCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_hide_visibility), prefs.hideVisibilityFocus, getString(R.string.desc_hide_visibility)) { prefs.hideVisibilityFocus = it }
             val dialogsCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_suppress_dialogs), prefs.suppressJsDialogs) { prefs.suppressJsDialogs = it }
+            val uploadsCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_allow_file_uploads), prefs.allowFileUploads, getString(R.string.pref_allow_file_uploads_desc)) { prefs.allowFileUploads = it }
+            val oauthPopupsCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_allow_oauth_popups), prefs.allowOAuthPopups, getString(R.string.pref_allow_oauth_popups_desc)) { prefs.allowOAuthPopups = it }
             lateinit var minJitterCard: View
             lateinit var maxJitterCard: View
             val jitterCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_jitter_enabled), prefs.microJitterEnabled, getString(R.string.desc_jitter_enabled)) { enabled ->
@@ -1246,6 +1248,8 @@ class SettingsActivity : AppCompatActivity() {
             maxJitterCard.visibility = jVis
             registerSearchEntry(getString(R.string.pref_hide_visibility), cat9Title, null, CAT_ANTIFP, visCard)
             registerSearchEntry(getString(R.string.pref_suppress_dialogs), cat9Title, null, CAT_ANTIFP, dialogsCard)
+            registerSearchEntry(getString(R.string.pref_allow_file_uploads), cat9Title, null, CAT_ANTIFP, uploadsCard)
+            registerSearchEntry(getString(R.string.pref_allow_oauth_popups), cat9Title, null, CAT_ANTIFP, oauthPopupsCard)
             registerSearchEntry(getString(R.string.pref_jitter_enabled), cat9Title, null, CAT_ANTIFP, jitterCard)
             refreshGroupShapes(behGroup, colors, density)
         }

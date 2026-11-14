@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
@@ -18,7 +19,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Message
 import android.os.PersistableBundle
+import android.print.PrintAttributes
+import android.print.PrintManager
+import android.provider.Browser
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
@@ -31,11 +36,14 @@ import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
+import android.webkit.HttpAuthHandler
 import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.webkit.WebViewDatabase
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -47,8 +55,11 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.TextViewCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.ProfileStore
@@ -59,6 +70,8 @@ import androidx.webkit.WebViewFeature
 import com.google.android.material.snackbar.Snackbar
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Minimal hardened browser host with Chrome-like top bar, pull-to-refresh,
@@ -96,6 +109,11 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     private lateinit var vpnBlockedTitle: TextView
     private lateinit var vpnBlockedBody: TextView
 
+    private lateinit var webViewContainer: View
+    private lateinit var errorOverlay: LinearLayout
+    private lateinit var errorOverlayIcon: ImageView
+    private lateinit var errorOverlayTitle: TextView
+    private lateinit var errorOverlayBody: TextView
     private lateinit var fullscreenContainer: FrameLayout
 
     private lateinit var prefs: SnakePreferences
@@ -159,8 +177,22 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     private var isPinLocked: Boolean = false
     private var pendingInitialLoad: Boolean = false
     private var pendingRestoreAfterPinUrl: String? = null
+    private var lastErrorUrl: String? = null
+    private var pendingFileUploadCallback: ValueCallback<Array<Uri>>? = null
+    private var fileUploadExecutor: java.util.concurrent.ExecutorService? = null
+    private var activePopupDialog: AlertDialog? = null
+    private var activePopupWebView: WebView? = null
     private var customFullscreenView: View? = null
     private var customFullscreenCallback: WebChromeClient.CustomViewCallback? = null
+    private var fullscreenRotateButton: ImageButton? = null
+    private var frozenPortraitSize: Pair<Int, Int>? = null
+    private var lastImeBottomPx: Int = 0
+
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        handleFileChooserResult(result.resultCode, result.data)
+    }
 
     private val unifiedUserAgent: String by lazy { resolveUnifiedUserAgent(this) }
     private val webViewChromeMajor: Int by lazy {
@@ -236,6 +268,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         })
 
         lastLoadedHomeUrl = prefs.homeUrl
+        val incomingExternalUrl = if (savedInstanceState == null) extractExternalViewUrl(intent) else null
         val inMemoryRestore = savedInstanceState?.getString(STATE_RESTORE_TOKEN)
             ?.let { ephemeralRestoreStates.remove(it) }
         val startAfterWipe = {
@@ -243,15 +276,36 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                 ?: if (!prefs.autoWipeOnExit) encryptedSessionStore.loadTabs(autoWipeOnExit = false) else null
             if (restoredState != null && restoredState.tabs.isNotEmpty()) {
                 applyRestoredSessionState(restoredState)
-                val targetUrl = activeSession.currentUrl
+                if (incomingExternalUrl != null) {
+                    createNewSession(loadHome = false, switchTo = true)
+                    Toast.makeText(this, R.string.external_link_opened_new_session, Toast.LENGTH_SHORT).show()
+                    if (PinLockCoordinator.isLocked(prefs)) {
+                        pendingInitialLoad = true
+                        pendingRestoreAfterPinUrl = incomingExternalUrl
+                        showPinLockOverlay()
+                    } else {
+                        safeLoadUrl(incomingExternalUrl)
+                    }
+                } else {
+                    val targetUrl = activeSession.currentUrl
+                    if (PinLockCoordinator.isLocked(prefs)) {
+                        pendingInitialLoad = true
+                        pendingRestoreAfterPinUrl = targetUrl
+                        showPinLockOverlay()
+                    } else if (targetUrl.isNotBlank() && targetUrl != DEFAULT_START_URL) {
+                        safeLoadUrl(targetUrl)
+                    } else {
+                        loadInitialHomePage()
+                    }
+                }
+            } else if (incomingExternalUrl != null) {
+                Toast.makeText(this, R.string.external_link_opened_new_session, Toast.LENGTH_SHORT).show()
                 if (PinLockCoordinator.isLocked(prefs)) {
                     pendingInitialLoad = true
-                    pendingRestoreAfterPinUrl = targetUrl
+                    pendingRestoreAfterPinUrl = incomingExternalUrl
                     showPinLockOverlay()
-                } else if (targetUrl.isNotBlank() && targetUrl != DEFAULT_START_URL) {
-                    safeLoadUrl(targetUrl)
                 } else {
-                    loadInitialHomePage()
+                    safeLoadUrl(incomingExternalUrl)
                 }
             } else if (PinLockCoordinator.isLocked(prefs)) {
                 pendingInitialLoad = true
@@ -269,9 +323,37 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val externalUrl = extractExternalViewUrl(intent) ?: return
+        createNewSession(loadHome = false, switchTo = true)
+        Toast.makeText(this, R.string.external_link_opened_new_session, Toast.LENGTH_SHORT).show()
+        if (isPinLocked || PinLockCoordinator.isLocked(prefs)) {
+            pendingInitialLoad = true
+            pendingRestoreAfterPinUrl = externalUrl
+            if (!isPinLocked) showPinLockOverlay()
+        } else {
+            safeLoadUrl(externalUrl)
+        }
+    }
+
+    private fun extractExternalViewUrl(intent: Intent?): String? {
+        if (intent?.action != Intent.ACTION_VIEW) return null
+        val data = intent.data ?: return null
+        val scheme = data.scheme?.lowercase(java.util.Locale.ROOT)
+        if (scheme != "http" && scheme != "https") return null
+        // Drop caller-supplied HTTP headers/extras so external apps cannot inject custom request headers.
+        intent.removeExtra(Browser.EXTRA_HEADERS)
+        val normalized = SnakePreferences.normalizeUrl(data.toString()) ?: return null
+        val normalizedScheme = runCatching { Uri.parse(normalized).scheme?.lowercase(java.util.Locale.ROOT) }.getOrNull()
+        return normalized.takeIf { normalizedScheme == "http" || normalizedScheme == "https" }
+    }
+
     private fun bindViews() {
         toolbar = findViewById(R.id.toolbar)
         urlPillContainer = findViewById(R.id.urlPillContainer)
+        webViewContainer = findViewById(R.id.webViewContainer)
         swipeRefresh = findViewById(R.id.swipeRefresh)
         webView = findViewById(R.id.webView)
         urlInput = findViewById(R.id.urlInput)
@@ -300,7 +382,40 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         vpnBlockedTitle = findViewById(R.id.vpnBlockedTitle)
         vpnBlockedBody = findViewById(R.id.vpnBlockedBody)
 
+        errorOverlay = findViewById(R.id.errorOverlay)
+        errorOverlayIcon = findViewById(R.id.errorOverlayIcon)
+        errorOverlayTitle = findViewById(R.id.errorOverlayTitle)
+        errorOverlayBody = findViewById(R.id.errorOverlayBody)
+
         fullscreenContainer = findViewById(R.id.fullscreenContainer)
+
+        val chromeElevationPx = 8f * resources.displayMetrics.density
+        toolbar.translationZ = chromeElevationPx
+        findBar.translationZ = chromeElevationPx
+        statusRow.translationZ = chromeElevationPx
+        progressBar.translationZ = chromeElevationPx
+
+        val rootFrame = findViewById<View>(R.id.rootFrame)
+        ViewCompat.setOnApplyWindowInsetsListener(rootFrame) { v, insets ->
+            lastImeBottomPx = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            updateWebViewImeTranslation()
+            ViewCompat.onApplyWindowInsets(v, insets)
+        }
+    }
+
+    private fun updateWebViewImeTranslation() {
+        val shouldShift = lastImeBottomPx > 0 &&
+            !urlInput.hasFocus() &&
+            !findInput.hasFocus() &&
+            !isPinLocked &&
+            customFullscreenView == null
+        if (shouldShift) {
+            val containerH = webViewContainer.height
+            val maxShift = if (containerH > 0) (containerH * 0.45f) else (180f * resources.displayMetrics.density)
+            webViewContainer.translationY = -lastImeBottomPx.toFloat().coerceAtMost(maxShift)
+        } else {
+            webViewContainer.translationY = 0f
+        }
     }
 
     private fun applySessionWebViewProfile(targetView: WebView, session: BrowserSession) {
@@ -330,7 +445,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             @Suppress("DEPRECATION")
             allowUniversalAccessFromFileURLs = false
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            setSupportMultipleWindows(false)
+            setSupportMultipleWindows(true)
             javaScriptCanOpenWindowsAutomatically = false
             builtInZoomControls = true
             displayZoomControls = false
@@ -381,8 +496,19 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             isVpnActive = { VpnGuard.isVpnActive(this) },
             onPageStartedCallback = { url ->
                 session.navigationGeneration++
+                val keepingErrorOverlay = url == DEFAULT_START_URL &&
+                    session === activeSession &&
+                    errorOverlay.visibility == View.VISIBLE &&
+                    lastErrorUrl != null
+                if (keepingErrorOverlay) {
+                    session.currentUrl = lastErrorUrl!!
+                    return@SnakeClient
+                }
                 session.currentUrl = url
                 if (url != DEFAULT_START_URL) {
+                    if (session === activeSession) {
+                        hideErrorOverlay(updateStartCard = false)
+                    }
                     prefs.sessionDirty = true
                     session.blockedHostsOnPage.clear()
                     val startedHost = runCatching { Uri.parse(url).host?.lowercase(java.util.Locale.ROOT) }.getOrNull()
@@ -401,6 +527,17 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                 }
             },
             onPageFinishedCallback = { url ->
+                val keepingErrorOverlay = url == DEFAULT_START_URL &&
+                    session === activeSession &&
+                    errorOverlay.visibility == View.VISIBLE &&
+                    lastErrorUrl != null
+                if (keepingErrorOverlay) {
+                    session.currentUrl = lastErrorUrl!!
+                    progressBar.visibility = View.GONE
+                    swipeRefresh.isRefreshing = false
+                    startPageCard.visibility = View.GONE
+                    return@SnakeClient
+                }
                 session.currentUrl = url
                 val pageTitle = targetView.title?.trim().orEmpty()
                 if (pageTitle.isNotEmpty()) {
@@ -472,6 +609,22 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                     recoverFromRendererCrash(session)
                 }
                 true
+            },
+            onPageErrorCallback = { failingUrl, _, description ->
+                runOnUiThread {
+                    if (session === activeSession) {
+                        showPageErrorOverlay(failingUrl, description)
+                    }
+                }
+            },
+            onHttpAuthRequestCallback = { view, handler, host, realm ->
+                runOnUiThread {
+                    if (session === activeSession && !isFinishing && !isDestroyed && !isPinLocked) {
+                        promptHttpAuth(session, view, handler, host, realm)
+                    } else {
+                        handler?.cancel()
+                    }
+                }
             }
         )
         session.snakeClient = client
@@ -479,6 +632,8 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
         val chrome = SnakeChrome(
             suppressDialogs = sessionPolicy.suppressJsDialogs,
+            allowFileUploads = sessionPolicy.allowFileUploads,
+            allowOAuthPopups = sessionPolicy.allowOAuthPopups,
             onProgressChangedCallback = { progress ->
                 if (session === activeSession) {
                     if (progress in 1..99) {
@@ -510,10 +665,45 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                         Toast.makeText(this, R.string.file_upload_blocked_notice, Toast.LENGTH_SHORT).show()
                     }
                 }
+            },
+            onOpenFileChooserCallback = { callback, params ->
+                if (session === activeSession && !isFinishing && !isDestroyed && !isPinLocked) {
+                    if (Looper.myLooper() == Looper.getMainLooper()) {
+                        launchSanitizedFileChooser(callback, params)
+                    } else {
+                        runOnUiThread { launchSanitizedFileChooser(callback, params) }
+                    }
+                    true
+                } else {
+                    false
+                }
+            },
+            onOpenPopupWindowCallback = { isUserGesture, resultMsg, allowPopup ->
+                if (isUserGesture && resultMsg != null && session === activeSession && !isFinishing && !isDestroyed && !isPinLocked) {
+                    if (Looper.myLooper() == Looper.getMainLooper()) {
+                        handlePopupWindowRequest(session, resultMsg, allowPopup)
+                    } else {
+                        runOnUiThread { handlePopupWindowRequest(session, resultMsg, allowPopup) }
+                    }
+                    true
+                } else {
+                    false
+                }
+            },
+            onCloseWindowCallback = { closedView ->
+                runOnUiThread {
+                    if (closedView != null && closedView === activePopupWebView) {
+                        closeActivePopupWindow()
+                    }
+                }
             }
         )
         session.snakeChrome = chrome
         targetView.webChromeClient = chrome
+
+        targetView.setOnLongClickListener {
+            if (isPinLocked || session !== activeSession) false else handleWebViewLongClick(targetView)
+        }
 
         targetView.setFindListener { activeMatchOrdinal, numberOfMatches, _ ->
             if (session === activeSession) {
@@ -532,17 +722,73 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         customFullscreenView = view
         customFullscreenCallback = callback
         fullscreenContainer.addView(view)
+        val density = resources.displayMetrics.density
+        val sizePx = (44 * density).toInt()
+        val marginPx = (16 * density).toInt()
+        val rotateBtn = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_rotate)
+            setColorFilter(Color.WHITE)
+            background = SnakeTheme.roundedSurface(0x99000000.toInt(), Color.TRANSPARENT, 22f, density)
+            contentDescription = getString(R.string.fullscreen_rotate_desc)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding((10 * density).toInt(), (10 * density).toInt(), (10 * density).toInt(), (10 * density).toInt())
+            layoutParams = FrameLayout.LayoutParams(sizePx, sizePx, Gravity.TOP or Gravity.END).apply {
+                topMargin = marginPx
+                marginEnd = marginPx
+            }
+            setOnClickListener { toggleFullscreenOrientation() }
+        }
+        fullscreenRotateButton = rotateBtn
+        fullscreenContainer.addView(rotateBtn)
         fullscreenContainer.visibility = View.VISIBLE
+        updateWebViewImeTranslation()
         syncMicroJitterState()
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun toggleFullscreenOrientation() {
+        val rootContainer = findViewById<View>(R.id.rootContainer)
+        if (requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE || frozenPortraitSize != null) {
+            frozenPortraitSize = null
+            rootContainer.layoutParams = rootContainer.layoutParams.apply {
+                width = ViewGroup.LayoutParams.MATCH_PARENT
+                height = ViewGroup.LayoutParams.MATCH_PARENT
+            }
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else {
+            val dm = resources.displayMetrics
+            val rawW = if (rootContainer.width > 0) rootContainer.width else dm.widthPixels
+            val rawH = if (rootContainer.height > 0) rootContainer.height else dm.heightPixels
+            val portraitW = minOf(rawW, rawH).coerceAtLeast(1)
+            val portraitH = maxOf(rawW, rawH).coerceAtLeast(1)
+            frozenPortraitSize = portraitW to portraitH
+            rootContainer.layoutParams = rootContainer.layoutParams.apply {
+                width = portraitW
+                height = portraitH
+            }
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
     }
 
     private fun exitFullscreenVideo() {
         val view = customFullscreenView ?: return
         fullscreenContainer.removeView(view)
+        fullscreenRotateButton?.let { fullscreenContainer.removeView(it) }
+        fullscreenRotateButton = null
         fullscreenContainer.visibility = View.GONE
         customFullscreenView = null
         customFullscreenCallback?.onCustomViewHidden()
         customFullscreenCallback = null
+        if (frozenPortraitSize != null || requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE) {
+            frozenPortraitSize = null
+            val rootContainer = findViewById<View>(R.id.rootContainer)
+            rootContainer.layoutParams = rootContainer.layoutParams.apply {
+                width = ViewGroup.LayoutParams.MATCH_PARENT
+                height = ViewGroup.LayoutParams.MATCH_PARENT
+            }
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        updateWebViewImeTranslation()
         syncMicroJitterState()
     }
 
@@ -558,9 +804,12 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         val isBlank = currentUrl.isNullOrBlank() || currentUrl == DEFAULT_START_URL
         val shouldShow = isBlank &&
             prefs.homeUrl == DEFAULT_START_URL &&
-            !prefs.startHintDismissed
+            !prefs.startHintDismissed &&
+            errorOverlay.visibility != View.VISIBLE
         startPageCard.visibility = if (shouldShow) View.VISIBLE else View.GONE
-        swipeRefresh.isEnabled = !shouldShow && vpnBlockedView.visibility != View.VISIBLE
+        swipeRefresh.isEnabled = !shouldShow &&
+            vpnBlockedView.visibility != View.VISIBLE &&
+            errorOverlay.visibility != View.VISIBLE
         syncMicroJitterState()
     }
 
@@ -693,6 +942,12 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         findViewById<TextView>(R.id.btnVpnRetry).setTextColor(colors.accent)
         findViewById<TextView>(R.id.btnVpnSettings).setTextColor(colors.muted)
 
+        errorOverlay.setBackgroundColor(colors.bg)
+        errorOverlayIcon.setColorFilter(colors.accent)
+        errorOverlayTitle.setTextColor(colors.text)
+        errorOverlayBody.setTextColor(colors.muted)
+        findViewById<TextView>(R.id.btnErrorRetry).setTextColor(colors.accent)
+
         swipeRefresh.setColorSchemeColors(colors.accent)
         swipeRefresh.setProgressBackgroundColorSchemeColor(colors.card)
         progressBar.progressTintList = ColorStateList.valueOf(colors.accent)
@@ -702,6 +957,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         val blockedByOverlay = isPinLocked ||
             startPageCard.visibility == View.VISIBLE ||
             vpnBlockedView.visibility == View.VISIBLE ||
+            errorOverlay.visibility == View.VISIBLE ||
             readerOverlay != null ||
             customFullscreenView != null
         val jitterEnabled = resolveSessionPolicy(activeSession).microJitterEnabled
@@ -777,6 +1033,8 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         session.snakeClient.blockExternalSchemes = policy.blockExternalSchemes
         session.snakeClient.vpnKillSwitchEnabled = prefs.vpnKillSwitchEnabled
         session.snakeChrome.suppressDialogs = policy.suppressJsDialogs
+        session.snakeChrome.allowFileUploads = policy.allowFileUploads
+        session.snakeChrome.allowOAuthPopups = policy.allowOAuthPopups
     }
 
     private fun bindControls() {
@@ -820,6 +1078,11 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
         urlInput.setOnFocusChangeListener { _, hasFocus ->
             btnClearUrl.visibility = if (hasFocus && !urlInput.text.isNullOrEmpty()) View.VISIBLE else View.GONE
+            updateWebViewImeTranslation()
+        }
+
+        findInput.setOnFocusChangeListener { _, _ ->
+            updateWebViewImeTranslation()
         }
 
         urlInput.addTextChangedListener(object : TextWatcher {
@@ -862,6 +1125,11 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                 startActivity(Intent(this, SettingsActivity::class.java))
             }
         }
+        findViewById<TextView>(R.id.btnErrorRetry).setOnClickListener {
+            val target = lastErrorUrl ?: webView.url?.takeIf { it != DEFAULT_START_URL } ?: prefs.homeUrl
+            hideErrorOverlay(updateStartCard = false)
+            safeLoadUrl(target)
+        }
 
         // Find-in-page controls
         findInput.addTextChangedListener(object : TextWatcher {
@@ -888,11 +1156,15 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         findCount.text = ""
         webView.clearMatches()
         hideKeyboard()
+        updateWebViewImeTranslation()
     }
 
     private fun showCustomOverflowMenu(anchor: View) {
         activeMenuPopup?.dismiss()
-        val hasPage = !webView.url.isNullOrBlank() && webView.url != DEFAULT_START_URL
+        val currentUrl = webView.url?.takeIf { it.isNotBlank() && it != DEFAULT_START_URL }
+            ?: lastErrorUrl?.takeIf { errorOverlay.visibility == View.VISIBLE }
+        val hasPage = !currentUrl.isNullOrBlank()
+        val isBookmarked = hasPage && encryptedSessionStore.isBookmarked(currentUrl!!)
         val items = listOf(
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_back, getString(R.string.btn_back), webView.canGoBack()) {
                 if (webView.canGoBack()) webView.goBack()
@@ -903,6 +1175,10 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_reload, getString(R.string.btn_reload), true) {
                 if (prefs.vpnKillSwitchEnabled && !VpnGuard.isVpnActive(this)) {
                     handleVpnBlocked(webView.url)
+                } else if (errorOverlay.visibility == View.VISIBLE && !lastErrorUrl.isNullOrBlank()) {
+                    val target = lastErrorUrl!!
+                    hideErrorOverlay(updateStartCard = false)
+                    safeLoadUrl(target)
                 } else {
                     webView.reload()
                 }
@@ -910,9 +1186,22 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             BrowserUiHelper.MenuEntry(R.drawable.ic_content_copy, getString(R.string.btn_copy_url), true) {
                 copyCurrentUrl()
             },
+            BrowserUiHelper.MenuEntry(R.drawable.ic_content_copy, getString(R.string.menu_share_url), hasPage) {
+                shareCurrentUrl()
+            },
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_find, getString(R.string.btn_find_in_page), true) {
                 findBar.visibility = View.VISIBLE
                 findInput.requestFocus()
+            },
+            BrowserUiHelper.MenuEntry(R.drawable.ic_info_outline, getString(R.string.menu_bookmarks), true) {
+                openBookmarksSheet()
+            },
+            BrowserUiHelper.MenuEntry(
+                R.drawable.ic_info_outline,
+                getString(if (isBookmarked) R.string.menu_bookmark_remove else R.string.menu_bookmark_add),
+                hasPage
+            ) {
+                toggleBookmark()
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_screenshot, getString(R.string.btn_capture), true) {
                 handleCaptureClick()
@@ -923,11 +1212,17 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             BrowserUiHelper.MenuEntry(R.drawable.ic_content_copy, getString(R.string.btn_save_offline), hasPage) {
                 saveCurrentPageOffline()
             },
+            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_captures, getString(R.string.menu_print_pdf), hasPage) {
+                printCurrentPage()
+            },
             BrowserUiHelper.MenuEntry(R.drawable.ic_settings_downloads, getString(R.string.btn_downloads), true) {
                 startActivity(Intent(this, DownloadsActivity::class.java))
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_captures, getString(R.string.btn_captures_viewer), true) {
                 startActivity(Intent(this, CapturesActivity::class.java))
+            },
+            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_wipe, getString(R.string.menu_clear_site_data), hasPage) {
+                clearCurrentSiteData()
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_wipe, getString(R.string.btn_wipe), true) {
                 requestWipeSession()
@@ -940,17 +1235,24 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     }
 
     private fun copyCurrentUrl() {
-        val current = webView.url?.takeIf { it.isNotBlank() } ?: urlInput.text?.toString().orEmpty()
+        val current = lastErrorUrl?.takeIf { errorOverlay.visibility == View.VISIBLE }
+            ?: webView.url?.takeIf { it.isNotBlank() }
+            ?: urlInput.text?.toString().orEmpty()
         if (current.isBlank()) return
+        copyTextToClipboard("url", current, R.string.url_copied)
+    }
+
+    private fun copyTextToClipboard(label: String, text: String, toastResId: Int) {
+        if (text.isBlank()) return
         val cm = getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager
-        val clip = ClipData.newPlainText("url", current)
+        val clip = ClipData.newPlainText(label, text)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             clip.description.extras = PersistableBundle().apply {
                 putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
             }
         }
         cm?.setPrimaryClip(clip)
-        Toast.makeText(this, R.string.url_copied, Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, toastResId, Toast.LENGTH_SHORT).show()
     }
 
     private fun loadInitialHomePage() {
@@ -978,12 +1280,14 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             }
         }
         vpnBlockedView.visibility = View.GONE
+        hideErrorOverlay(updateStartCard = false)
         if (target != DEFAULT_START_URL) {
             prefs.sessionDirty = true
         }
         urlInput.clearFocus()
         webView.loadUrl(target)
         updateStartPageCardVisibility(target)
+        updateWebViewImeTranslation()
     }
 
     /**
@@ -1089,10 +1393,516 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     }
 
     private fun showVpnBlockedOverlay() {
+        hideErrorOverlay(updateStartCard = false)
         vpnBlockedView.visibility = View.VISIBLE
         swipeRefresh.isEnabled = false
         statusLabel.text = getString(R.string.status_vpn_blocked)
         syncMicroJitterState()
+    }
+
+    private fun showPageErrorOverlay(failingUrl: String, description: String) {
+        if (isFinishing || isDestroyed) return
+        if (vpnBlockedView.visibility == View.VISIBLE) return
+        if (failingUrl.isBlank() || failingUrl == DEFAULT_START_URL) return
+        lastErrorUrl = failingUrl
+        activeSession.currentUrl = failingUrl
+        val base = getString(R.string.error_page_message)
+        errorOverlayBody.text = description.takeIf { it.isNotBlank() }?.let { "$base\n\n$it" } ?: base
+        errorOverlay.visibility = View.VISIBLE
+        startPageCard.visibility = View.GONE
+        progressBar.visibility = View.GONE
+        swipeRefresh.isRefreshing = false
+        swipeRefresh.isEnabled = false
+        updateUrlDisplay(failingUrl, forceUpdateText = false)
+        activeSession.webView.stopLoading()
+        if (activeSession.webView.url != DEFAULT_START_URL) {
+            activeSession.webView.loadUrl(DEFAULT_START_URL)
+        }
+        syncMicroJitterState()
+    }
+
+    private fun hideErrorOverlay(updateStartCard: Boolean = true) {
+        lastErrorUrl = null
+        if (errorOverlay.visibility != View.GONE) {
+            errorOverlay.visibility = View.GONE
+        }
+        if (updateStartCard) {
+            updateStartPageCardVisibility(activeSession.currentUrl)
+        } else {
+            swipeRefresh.isEnabled = startPageCard.visibility != View.VISIBLE && vpnBlockedView.visibility != View.VISIBLE
+        }
+    }
+
+    private fun promptHttpAuth(
+        session: BrowserSession,
+        view: WebView?,
+        handler: HttpAuthHandler?,
+        host: String,
+        realm: String
+    ) {
+        val effectiveUrl = view?.url?.takeIf { !it.isNullOrBlank() && it != DEFAULT_START_URL } ?: session.currentUrl
+        if (!SnakeClient.isSameHttpsHost(effectiveUrl, host)) {
+            handler?.cancel()
+            return
+        }
+        if (isFinishing || isDestroyed || isPinLocked) {
+            handler?.cancel()
+            return
+        }
+        val density = resources.displayMetrics.density
+        val pad = (16 * density).toInt()
+        val colors = SnakeTheme.resolveDialogColors(prefs.themePalette, this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, (8 * density).toInt(), pad, 0)
+        }
+        val userInput = EditText(this).apply {
+            hint = getString(R.string.http_auth_username)
+            setTextColor(colors.title)
+            setHintTextColor(colors.body)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            isSingleLine = true
+        }
+        val passInput = EditText(this).apply {
+            hint = getString(R.string.http_auth_password)
+            setTextColor(colors.title)
+            setHintTextColor(colors.body)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            isSingleLine = true
+        }
+        container.addView(userInput)
+        container.addView(passInput)
+
+        val displayRealm = if (realm.isNotBlank()) "$host ($realm)" else host
+        val handled = AtomicBoolean(false)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.http_auth_title)
+            .setMessage(getString(R.string.http_auth_message, displayRealm))
+            .setView(container)
+            .setPositiveButton(R.string.http_auth_signin) { _, _ ->
+                if (handled.compareAndSet(false, true)) {
+                    handler?.proceed(userInput.text?.toString().orEmpty(), passInput.text?.toString().orEmpty())
+                }
+            }
+            .setNegativeButton(R.string.action_cancel) { _, _ ->
+                if (handled.compareAndSet(false, true)) handler?.cancel()
+            }
+            .setOnCancelListener {
+                if (handled.compareAndSet(false, true)) handler?.cancel()
+            }
+            .setOnDismissListener {
+                if (handled.compareAndSet(false, true)) handler?.cancel()
+            }
+            .show()
+        trackDialog(dialog)
+        SnakeTheme.styleExpressiveDialog(dialog, prefs.themePalette)
+    }
+
+    private fun launchSanitizedFileChooser(
+        filePathCallback: ValueCallback<Array<Uri>>?,
+        params: WebChromeClient.FileChooserParams?
+    ) {
+        if (filePathCallback == null) return
+        pendingFileUploadCallback?.onReceiveValue(null)
+        pendingFileUploadCallback = filePathCallback
+        val pickerIntent = runCatching { params?.createIntent() }.getOrNull()
+            ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }
+        val launched = runCatching {
+            fileChooserLauncher.launch(pickerIntent)
+            true
+        }.getOrDefault(false)
+        if (!launched) {
+            pendingFileUploadCallback = null
+            filePathCallback.onReceiveValue(null)
+            Toast.makeText(this, R.string.file_upload_sanitize_failed, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun handleFileChooserResult(resultCode: Int, data: Intent?) {
+        val callback = pendingFileUploadCallback ?: return
+        pendingFileUploadCallback = null
+        if (resultCode != RESULT_OK || data == null) {
+            callback.onReceiveValue(null)
+            return
+        }
+        val rawUris = mutableListOf<Uri>()
+        data.clipData?.let { clip ->
+            for (i in 0 until clip.itemCount) {
+                clip.getItemAt(i).uri?.let { rawUris.add(it) }
+            }
+        }
+        if (rawUris.isEmpty()) {
+            val parsed = WebChromeClient.FileChooserParams.parseResult(resultCode, data)
+            if (parsed != null) {
+                rawUris.addAll(parsed)
+            } else {
+                data.data?.let { rawUris.add(it) }
+            }
+        }
+        if (rawUris.isEmpty()) {
+            callback.onReceiveValue(null)
+            return
+        }
+        val appCtx = applicationContext
+        val executor = fileUploadExecutor ?: Executors.newSingleThreadExecutor().also { fileUploadExecutor = it }
+        executor.execute {
+            val sanitized = mutableListOf<Uri>()
+            var hitTooLarge = false
+            var hitFailed = false
+            for (uri in rawUris) {
+                when (val res = UploadSanitizer.sanitize(appCtx, uri)) {
+                    is UploadSanitizer.SanitizeResult.Success -> sanitized.add(res.uri)
+                    UploadSanitizer.SanitizeResult.TooLarge -> hitTooLarge = true
+                    UploadSanitizer.SanitizeResult.Failed -> hitFailed = true
+                }
+            }
+            mainHandler.post {
+                if (isFinishing || isDestroyed) {
+                    callback.onReceiveValue(null)
+                    return@post
+                }
+                if (hitTooLarge) {
+                    Toast.makeText(this, R.string.file_upload_too_large, Toast.LENGTH_SHORT).show()
+                } else if (hitFailed && sanitized.isEmpty()) {
+                    Toast.makeText(this, R.string.file_upload_sanitize_failed, Toast.LENGTH_SHORT).show()
+                }
+                callback.onReceiveValue(if (sanitized.isEmpty()) null else sanitized.toTypedArray())
+            }
+        }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun handlePopupWindowRequest(
+        parentSession: BrowserSession,
+        resultMsg: Message?,
+        allowPopup: Boolean
+    ) {
+        if (resultMsg == null) return
+        val transport = resultMsg.obj as? WebView.WebViewTransport ?: return
+        if (!allowPopup) {
+            Toast.makeText(this, R.string.popup_blocked_notice, Toast.LENGTH_SHORT).show()
+            val handled = AtomicBoolean(false)
+            val extractor = WebView(this)
+            extractor.settings.apply {
+                javaScriptEnabled = false
+                domStorageEnabled = false
+                allowFileAccess = false
+                allowContentAccess = false
+                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                userAgentString = unifiedUserAgent
+            }
+            val cleanupExtractor = {
+                runCatching {
+                    extractor.stopLoading()
+                    extractor.webViewClient = WebViewClient()
+                    extractor.destroy()
+                }
+            }
+            val openExtractedUrl = { rawUrl: String ->
+                if (handled.compareAndSet(false, true)) {
+                    mainHandler.post { cleanupExtractor() }
+                    val safeUrl = SnakePreferences.normalizeUrl(rawUrl)
+                    if (safeUrl != null && !isFinishing && !isDestroyed && !isPinLocked) {
+                        createNewSession(loadHome = false, switchTo = true)
+                        safeLoadUrl(safeUrl)
+                    }
+                }
+            }
+            extractor.webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                    val u = request?.url?.toString()
+                    if (!u.isNullOrBlank()) openExtractedUrl(u)
+                    return true
+                }
+
+                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                    if (!url.isNullOrBlank() && url != DEFAULT_START_URL) {
+                        openExtractedUrl(url)
+                    }
+                }
+
+                override fun shouldInterceptRequest(
+                    view: WebView?,
+                    request: android.webkit.WebResourceRequest?
+                ): android.webkit.WebResourceResponse = android.webkit.WebResourceResponse(
+                    "text/plain",
+                    "utf-8",
+                    java.io.ByteArrayInputStream(ByteArray(0))
+                )
+            }
+            mainHandler.postDelayed({
+                if (handled.compareAndSet(false, true)) cleanupExtractor()
+            }, 2500L)
+            transport.webView = extractor
+            resultMsg.sendToTarget()
+            return
+        }
+
+        closeActivePopupWindow()
+        val popupWebView = WebView(this)
+        applySessionWebViewProfile(popupWebView, parentSession)
+        popupWebView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            allowFileAccess = false
+            allowContentAccess = false
+            @Suppress("DEPRECATION")
+            setGeolocationEnabled(false)
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            setSupportMultipleWindows(false)
+            javaScriptCanOpenWindowsAutomatically = false
+            userAgentString = unifiedUserAgent
+        }
+        disableRequestedWithHeader(popupWebView.settings)
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(popupWebView, false)
+        }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+            runCatching {
+                ProfileStore.getInstance()
+                    .getOrCreateProfile(parentSession.webViewProfileName)
+                    .cookieManager
+                    .apply {
+                        setAcceptCookie(true)
+                        setAcceptThirdPartyCookies(popupWebView, false)
+                    }
+            }
+        }
+
+        val policy = resolveSessionPolicy(parentSession)
+        val blocklist = buildSessionBlocklist(policy)
+        val vpnDownWithKillSwitch = prefs.vpnKillSwitchEnabled && !VpnGuard.isVpnActive(this)
+        val flags = policy.toSnakeFeatureFlags().copy(
+            blockWebSockets = vpnDownWithKillSwitch,
+            blockWebRtcIce = policy.blockWebRtcIce || vpnDownWithKillSwitch
+        )
+        val compiled = SnakeScript.build(
+            template = snakeTemplate,
+            seed = parentSession.sessionSeed,
+            blocklistRules = blocklist.rules,
+            flags = flags,
+            chromeMajor = webViewChromeMajor,
+            chromeFullVersion = webViewChromeFullVersion
+        )
+        val popupScriptHandler = SnakeScript.install(popupWebView, compiled)
+
+        popupWebView.webViewClient = SnakeClient(
+            blocklist = blocklist,
+            blocklistEnabled = policy.builtinBlocklistEnabled || blocklist.rules.isNotEmpty(),
+            blockExternalSchemes = policy.blockExternalSchemes,
+            vpnKillSwitchEnabled = prefs.vpnKillSwitchEnabled,
+            isVpnActive = { VpnGuard.isVpnActive(this) },
+            shouldPromptHttp = { uri ->
+                val host = uri.host?.lowercase(java.util.Locale.ROOT).orEmpty()
+                host.isEmpty() || host !in parentSession.approvedHttpHosts
+            },
+            onHttpPromptCallback = { url -> runOnUiThread { promptHttpNavigation(url) } },
+            onSslErrorCallback = { error, handler -> runOnUiThread { promptSslError(error, handler) } },
+            onExternalSchemeCallback = { uri -> promptExternalScheme(uri) }
+        )
+        popupWebView.webChromeClient = SnakeChrome(
+            suppressDialogs = policy.suppressJsDialogs,
+            allowFileUploads = false,
+            allowOAuthPopups = false,
+            onCloseWindowCallback = { closed ->
+                runOnUiThread {
+                    if (closed == null || closed === activePopupWebView) closeActivePopupWindow()
+                }
+            }
+        )
+
+        val containerHeight = (resources.displayMetrics.heightPixels * 0.62f).toInt().coerceAtLeast(360)
+        val container = FrameLayout(this).apply {
+            addView(popupWebView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, containerHeight))
+        }
+        activePopupWebView = popupWebView
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.popup_window_title)
+            .setView(container)
+            .setNegativeButton(R.string.popup_window_close) { _, _ -> closeActivePopupWindow() }
+            .setOnDismissListener {
+                runCatching {
+                    if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                        popupScriptHandler?.remove()
+                    }
+                    popupWebView.stopLoading()
+                    popupWebView.webViewClient = WebViewClient()
+                    popupWebView.webChromeClient = null
+                    (popupWebView.parent as? ViewGroup)?.removeView(popupWebView)
+                    popupWebView.destroy()
+                }
+                if (activePopupWebView === popupWebView) {
+                    activePopupWebView = null
+                    activePopupDialog = null
+                }
+            }
+            .show()
+        activePopupDialog = dialog
+        trackDialog(dialog)
+        SnakeTheme.styleExpressiveDialog(dialog, prefs.themePalette)
+
+        transport.webView = popupWebView
+        resultMsg.sendToTarget()
+    }
+
+    private fun closeActivePopupWindow() {
+        val dialog = activePopupDialog
+        val popup = activePopupWebView
+        activePopupDialog = null
+        activePopupWebView = null
+        runCatching { dialog?.dismiss() }
+        if (popup != null) {
+            runCatching {
+                popup.stopLoading()
+                popup.webViewClient = WebViewClient()
+                popup.webChromeClient = null
+                (popup.parent as? ViewGroup)?.removeView(popup)
+                popup.destroy()
+            }
+        }
+    }
+
+    private fun handleWebViewLongClick(targetView: WebView): Boolean {
+        val hit = targetView.hitTestResult
+        val raw = hit.extra?.trim().orEmpty()
+        if (raw.isEmpty()) return false
+        val safeHttp = SnakePreferences.normalizeUrl(raw)
+        val isImage = hit.type == WebView.HitTestResult.IMAGE_TYPE ||
+            hit.type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE
+        val isLink = hit.type == WebView.HitTestResult.SRC_ANCHOR_TYPE ||
+            hit.type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE
+        if (!isImage && !isLink) return false
+
+        val options = mutableListOf<Pair<String, () -> Unit>>()
+        if (safeHttp != null) {
+            options.add(getString(R.string.context_open_new_session) to {
+                createNewSession(loadHome = false, switchTo = true)
+                safeLoadUrl(safeHttp)
+            })
+            options.add(getString(R.string.context_copy_link) to {
+                copyTextToClipboard("url", safeHttp, R.string.url_copied)
+            })
+            if (prefs.downloadsEnabled) {
+                if (hit.type == WebView.HitTestResult.SRC_ANCHOR_TYPE) {
+                    options.add(getString(R.string.context_download_link) to {
+                        promptDownloadConfirmation(safeHttp, unifiedUserAgent, null, null)
+                    })
+                } else {
+                    options.add(getString(R.string.context_download_image) to {
+                        promptDownloadConfirmation(safeHttp, unifiedUserAgent, null, null)
+                    })
+                }
+            }
+        } else if (isImage && prefs.downloadsEnabled &&
+            (raw.startsWith("data:", ignoreCase = true) || raw.startsWith("blob:", ignoreCase = true))
+        ) {
+            options.add(getString(R.string.context_download_image) to {
+                promptDownloadConfirmation(raw, unifiedUserAgent, null, null)
+            })
+        }
+        if (options.isEmpty()) return false
+
+        val labels = options.map { it.first }.toTypedArray()
+        val dialog = AlertDialog.Builder(this)
+            .setItems(labels) { _, which -> options.getOrNull(which)?.second?.invoke() }
+            .setNegativeButton(R.string.action_cancel, null)
+            .show()
+        trackDialog(dialog)
+        SnakeTheme.styleExpressiveDialog(dialog, prefs.themePalette)
+        return true
+    }
+
+    private fun openBookmarksSheet() {
+        val sheet = BrowserUiHelper.showBookmarksSheet(
+            activity = this,
+            palette = prefs.themePalette,
+            bookmarksProvider = { encryptedSessionStore.listBookmarks() },
+            onSelectBookmark = { bookmark -> safeLoadUrl(bookmark.url) },
+            onDeleteBookmark = { bookmark -> encryptedSessionStore.removeBookmark(bookmark.url) }
+        )
+        trackDialog(sheet)
+    }
+
+    private fun toggleBookmark() {
+        val current = webView.url?.takeIf { it.isNotBlank() && it != DEFAULT_START_URL } ?: return
+        if (encryptedSessionStore.isBookmarked(current)) {
+            encryptedSessionStore.removeBookmark(current)
+            Toast.makeText(this, R.string.bookmark_removed, Toast.LENGTH_SHORT).show()
+        } else {
+            encryptedSessionStore.addBookmark(current, webView.title.orEmpty())
+            Toast.makeText(this, R.string.bookmark_added, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun shareCurrentUrl() {
+        val current = webView.url?.takeIf { it.isNotBlank() && it != DEFAULT_START_URL }
+            ?: lastErrorUrl?.takeIf { errorOverlay.visibility == View.VISIBLE }
+            ?: return
+        val safe = SnakePreferences.normalizeUrl(current) ?: return
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, safe)
+        }
+        runCatching {
+            startActivity(Intent.createChooser(sendIntent, getString(R.string.menu_share_url)))
+        }
+    }
+
+    private fun printCurrentPage() {
+        val current = webView.url?.takeIf { it.isNotBlank() && it != DEFAULT_START_URL } ?: return
+        if (current.isBlank()) return
+        val pm = getSystemService(PRINT_SERVICE) as? PrintManager
+        if (pm == null) {
+            Toast.makeText(this, R.string.print_unavailable, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val jobName = getString(R.string.print_job_name)
+        runCatching {
+            val adapter = webView.createPrintDocumentAdapter(jobName)
+            pm.print(jobName, adapter, PrintAttributes.Builder().build())
+        }.onFailure {
+            Toast.makeText(this, R.string.print_unavailable, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun clearCurrentSiteData() {
+        val current = webView.url?.takeIf { it.isNotBlank() && it != DEFAULT_START_URL } ?: return
+        val parsed = runCatching { Uri.parse(current) }.getOrNull() ?: return
+        val origin = if (!parsed.scheme.isNullOrBlank() && !parsed.authority.isNullOrBlank()) {
+            "${parsed.scheme}://${parsed.authority}"
+        } else {
+            return
+        }
+        WebStorage.getInstance().deleteOrigin(origin)
+        val clearCookiesForManager = { cm: CookieManager ->
+            val rawCookies = runCatching { cm.getCookie(current) }.getOrNull().orEmpty()
+            if (rawCookies.isNotBlank()) {
+                val hosts = listOfNotNull(origin, parsed.host?.let { "https://$it" }, parsed.host?.let { "http://$it" }).distinct()
+                rawCookies.split(';').forEach { pair ->
+                    val name = pair.substringBefore('=').trim()
+                    if (name.isNotEmpty()) {
+                        hosts.forEach { target ->
+                            cm.setCookie(target, "$name=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/")
+                        }
+                    }
+                }
+                cm.flush()
+            }
+        }
+        clearCookiesForManager(CookieManager.getInstance())
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+            runCatching {
+                ProfileStore.getInstance()
+                    .getProfile(activeSession.webViewProfileName)
+                    ?.cookieManager
+                    ?.let { clearCookiesForManager(it) }
+            }
+        }
+        Toast.makeText(this, R.string.site_data_cleared, Toast.LENGTH_SHORT).show()
     }
 
     private fun promptExternalScheme(uri: Uri): Boolean {
@@ -1340,6 +2150,8 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             closeFindBar()
             closeReaderMode()
             exitFullscreenVideo()
+            closeActivePopupWindow()
+            hideErrorOverlay(updateStartCard = false)
             pendingSslHandler?.cancel()
             pendingSslHandler = null
             activeSecurityDialog?.dismiss()
@@ -1782,8 +2594,10 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     private fun showPinLockOverlay() {
         if (isPinLocked || !prefs.pinLockEnabled) return
         isPinLocked = true
+        updateWebViewImeTranslation()
         microJitter.stop()
         activeMenuPopup?.dismiss()
+        closeActivePopupWindow()
         pendingSslHandler?.cancel()
         pendingSslHandler = null
         activeSecurityDialog?.dismiss()
@@ -1834,6 +2648,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             }
             showOnboardingIfNeeded()
         }
+        updateWebViewImeTranslation()
         syncMicroJitterState()
     }
 
@@ -1858,6 +2673,11 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         closeFindBar()
         closeReaderMode()
         exitFullscreenVideo()
+        closeActivePopupWindow()
+        hideErrorOverlay(updateStartCard = false)
+        pendingFileUploadCallback?.onReceiveValue(null)
+        pendingFileUploadCallback = null
+        UploadSanitizer.clearTempUploads(this)
 
         // Destroy all background sessions so no hidden tabs or renderers survive a wipe.
         val extraSessions = sessions.filter { it !== activeSession }
@@ -2106,6 +2926,13 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        frozenPortraitSize?.let { (w, h) ->
+            val rootContainer = findViewById<View>(R.id.rootContainer)
+            rootContainer.layoutParams = rootContainer.layoutParams.apply {
+                width = w
+                height = h
+            }
+        }
         applyThemePalette()
         urlInput.hint = getString(R.string.url_hint)
         findInput.hint = getString(R.string.find_hint)
@@ -2117,12 +2944,17 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         vpnBlockedBody.text = getString(R.string.vpn_blocked_body)
         findViewById<TextView>(R.id.btnVpnRetry).text = getString(R.string.vpn_retry)
         findViewById<TextView>(R.id.btnVpnSettings).text = getString(R.string.vpn_open_settings)
+        errorOverlayTitle.text = getString(R.string.error_page_title)
+        findViewById<TextView>(R.id.btnErrorRetry).text = getString(R.string.error_page_retry)
     }
 
     override fun onDestroy() {
         activeMenuPopup?.dismiss()
         activeSessionsSheet?.dismiss()
         onboardingDialog?.dismiss()
+        closeActivePopupWindow()
+        pendingFileUploadCallback?.onReceiveValue(null)
+        pendingFileUploadCallback = null
         pendingSslHandler?.cancel()
         pendingSslHandler = null
         activeSecurityDialog?.dismiss()
@@ -2135,6 +2967,9 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         if (prefs.autoWipeOnExit && !isChangingConfigurations) {
             wipeSession(reloadBlank = false, reseed = false)
         }
+        UploadSanitizer.clearTempUploads(this)
+        fileUploadExecutor?.shutdownNow()
+        fileUploadExecutor = null
         captureManager.shutdown()
         downloadHelper.shutdown()
         val deleteProfilesOnDestroy = prefs.autoWipeOnExit && !isChangingConfigurations

@@ -18,11 +18,16 @@ import android.webkit.WebView
  */
 class SnakeChrome(
     @Volatile var suppressDialogs: Boolean = true,
+    @Volatile var allowFileUploads: Boolean = false,
+    @Volatile var allowOAuthPopups: Boolean = false,
     private val onProgressChangedCallback: (Int) -> Unit = {},
     private val onTitleChangedCallback: (String) -> Unit = {},
     private val onShowCustomViewCallback: (View?, CustomViewCallback?) -> Unit = { _, _ -> },
     private val onHideCustomViewCallback: () -> Unit = {},
-    private val onFileChooserBlockedCallback: () -> Unit = {}
+    private val onFileChooserBlockedCallback: () -> Unit = {},
+    private val onOpenFileChooserCallback: ((ValueCallback<Array<Uri>>, FileChooserParams?) -> Boolean)? = null,
+    private val onOpenPopupWindowCallback: ((isUserGesture: Boolean, resultMsg: Message?, isOAuthAllowed: Boolean) -> Boolean)? = null,
+    private val onCloseWindowCallback: ((WebView?) -> Unit)? = null
 ) : WebChromeClient() {
 
     override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -96,6 +101,11 @@ class SnakeChrome(
         filePathCallback: ValueCallback<Array<Uri>>?,
         fileChooserParams: FileChooserParams?
     ): Boolean {
+        if (allowFileUploads && filePathCallback != null && onOpenFileChooserCallback != null) {
+            if (onOpenFileChooserCallback.invoke(filePathCallback, fileChooserParams)) {
+                return true
+            }
+        }
         onFileChooserBlockedCallback()
         // Must invoke the callback with null when returning true so WebView does not deadlock <input type="file">.
         filePathCallback?.onReceiveValue(null)
@@ -107,7 +117,16 @@ class SnakeChrome(
         isDialog: Boolean,
         isUserGesture: Boolean,
         resultMsg: Message?
-    ): Boolean = false
+    ): Boolean {
+        if (!isUserGesture || resultMsg == null) {
+            return false
+        }
+        return onOpenPopupWindowCallback?.invoke(true, resultMsg, allowOAuthPopups) ?: false
+    }
+
+    override fun onCloseWindow(window: WebView?) {
+        onCloseWindowCallback?.invoke(window)
+    }
 
     override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
         onShowCustomViewCallback(view, callback)

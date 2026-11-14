@@ -1,10 +1,15 @@
 package com.nromanovich.stealthsnake
 
 import android.net.Uri
+import android.os.Message
 import android.webkit.GeolocationPermissions
+import android.webkit.HttpAuthHandler
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -165,5 +170,70 @@ class SnakeClientAndChromeTest {
         assertTrue(client.onRenderProcessGone(null, null))
         assertTrue(crashHandled)
         assertTrue(SnakeClient(BlocklistEngine.fromRules(emptyList())).onRenderProcessGone(null, null))
+    }
+
+    @Test
+    fun `SnakeClient reports only main frame non blank errors and gates http auth on same HTTPS host`() {
+        val reportedErrors = mutableListOf<Triple<String, Int, String>>()
+        val authPrompts = mutableListOf<Pair<String, String>>()
+        val client = SnakeClient(
+            BlocklistEngine.fromRules(emptyList()),
+            onPageErrorCallback = { url, code, desc -> reportedErrors.add(Triple(url, code, desc)) },
+            onHttpAuthRequestCallback = { _, _, host, realm -> authPrompts.add(host to realm) }
+        )
+
+        client.onReceivedError(null, fakeRequest("https://cdn.example/img.png", isMainFrame = false), null)
+        client.onReceivedError(null, fakeRequest("about:blank", isMainFrame = true), null)
+        assertTrue(reportedErrors.isEmpty())
+
+        client.onReceivedError(null, fakeRequest("https://down.example/page", isMainFrame = true), null)
+        assertEquals(listOf(Triple("https://down.example/page", -1, "")), reportedErrors)
+
+        assertTrue(SnakeClient.isSameHttpsHost("https://vault.example/login", "vault.example"))
+        assertFalse(SnakeClient.isSameHttpsHost("http://vault.example/login", "vault.example"))
+        assertFalse(SnakeClient.isSameHttpsHost("https://evil.example/embed", "vault.example"))
+
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val webView = WebView(ctx).apply { loadUrl("https://vault.example/login") }
+        client.onReceivedHttpAuthRequest(webView, null, "evil.example", "Trap")
+        assertTrue(authPrompts.isEmpty())
+
+        client.onReceivedHttpAuthRequest(webView, null, "vault.example", "Corp")
+        assertEquals(listOf("vault.example" to "Corp"), authPrompts)
+    }
+
+    @Test
+    fun `SnakeChrome gates file chooser and gesture initiated OAuth popups`() {
+        var chooserOpened = false
+        var chooserBlocked = false
+        val openPopupCalls = mutableListOf<Boolean>()
+        val chrome = SnakeChrome(
+            allowFileUploads = false,
+            allowOAuthPopups = true,
+            onFileChooserBlockedCallback = { chooserBlocked = true },
+            onOpenFileChooserCallback = { cb, _ ->
+                chooserOpened = true
+                cb.onReceiveValue(null)
+                true
+            },
+            onOpenPopupWindowCallback = { _, _, allowPopup ->
+                openPopupCalls.add(allowPopup)
+                true
+            }
+        )
+
+        assertTrue(chrome.onShowFileChooser(null, ValueCallback {}, null))
+        assertTrue(chooserBlocked)
+        assertFalse(chooserOpened)
+
+        chrome.allowFileUploads = true
+        assertTrue(chrome.onShowFileChooser(null, ValueCallback {}, null))
+        assertTrue(chooserOpened)
+
+        assertFalse(chrome.onCreateWindow(null, isDialog = false, isUserGesture = false, resultMsg = Message.obtain()))
+        assertTrue(openPopupCalls.isEmpty())
+
+        assertTrue(chrome.onCreateWindow(null, isDialog = false, isUserGesture = true, resultMsg = Message.obtain()))
+        assertEquals(listOf(true), openPopupCalls)
     }
 }

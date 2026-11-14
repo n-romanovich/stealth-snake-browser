@@ -227,6 +227,7 @@
             android:visibility="gone" />
 
         <FrameLayout
+            android:id="@+id/webViewContainer"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1">
@@ -389,6 +390,56 @@
                         android:text="@string/vpn_open_settings"
                         android:textSize="14sp" />
                 </LinearLayout>
+            </LinearLayout>
+
+            <!-- Custom page error overlay suppressing chrome-error:// -->
+            <LinearLayout
+                android:id="@+id/errorOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="28dp"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/errorOverlayIcon"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_info_outline" />
+
+                <TextView
+                    android:id="@+id/errorOverlayTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/error_page_title"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/errorOverlayBody"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center"
+                    android:maxWidth="310dp"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/btnErrorRetry"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="10dp"
+                    android:text="@string/error_page_retry"
+                    android:textSize="14sp" />
             </LinearLayout>
         </FrameLayout>
     </LinearLayout>

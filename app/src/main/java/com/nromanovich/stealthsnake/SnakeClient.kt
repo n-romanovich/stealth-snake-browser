@@ -3,8 +3,10 @@ package com.nromanovich.stealthsnake
 import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
+import android.webkit.HttpAuthHandler
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -19,7 +21,7 @@ import java.util.Locale
  *  - Blocks external/custom URI schemes (`intent://`, `tel:`, `file://`, etc.) to prevent
  *    installed-app enumeration and sandbox escape vectors, or delegates safely when allowed.
  *  - Optionally prompts before unencrypted `http://` main-frame navigations, handles SSL errors,
- *    and recovers cleanly if the WebView renderer process terminates.
+ *    page load errors, same-origin HTTPS auth challenges, and renderer crash recovery.
  */
 class SnakeClient(
     @Volatile var blocklist: BlocklistEngine,
@@ -35,7 +37,9 @@ class SnakeClient(
     private val onHttpPromptCallback: (String) -> Unit = {},
     private val onSslErrorCallback: ((SslError?, SslErrorHandler?) -> Unit)? = null,
     private val onExternalSchemeCallback: ((Uri) -> Boolean)? = null,
-    private val onRenderProcessGoneCallback: ((RenderProcessGoneDetail?) -> Boolean)? = null
+    private val onRenderProcessGoneCallback: ((RenderProcessGoneDetail?) -> Boolean)? = null,
+    private val onPageErrorCallback: ((url: String, errorCode: Int, description: String) -> Unit)? = null,
+    private val onHttpAuthRequestCallback: ((view: WebView?, handler: HttpAuthHandler?, host: String, realm: String) -> Unit)? = null
 ) : WebViewClient() {
 
     override fun shouldInterceptRequest(
@@ -111,6 +115,42 @@ class SnakeClient(
         }
     }
 
+    override fun onReceivedError(
+        view: WebView?,
+        request: WebResourceRequest?,
+        error: WebResourceError?
+    ) {
+        if (error != null) {
+            super.onReceivedError(view, request, error)
+        }
+        if (request?.isForMainFrame != true) return
+        val failingUrl = request.url?.toString().orEmpty()
+        if (failingUrl.isBlank() || failingUrl == MainActivity.DEFAULT_START_URL) return
+        val code = error?.errorCode ?: -1
+        val desc = error?.description?.toString().orEmpty()
+        onPageErrorCallback?.invoke(failingUrl, code, desc)
+    }
+
+    override fun onReceivedHttpAuthRequest(
+        view: WebView?,
+        handler: HttpAuthHandler?,
+        host: String?,
+        realm: String?
+    ) {
+        val targetHost = host?.trim().orEmpty()
+        val cb = onHttpAuthRequestCallback
+        if (cb == null || targetHost.isEmpty()) {
+            handler?.cancel()
+            return
+        }
+        val pageUrl = view?.url
+        if (!pageUrl.isNullOrBlank() && pageUrl != MainActivity.DEFAULT_START_URL && !isSameHttpsHost(pageUrl, targetHost)) {
+            handler?.cancel()
+            return
+        }
+        cb(view, handler, targetHost, realm.orEmpty())
+    }
+
     override fun onRenderProcessGone(
         view: WebView?,
         detail: RenderProcessGoneDetail?
@@ -127,6 +167,14 @@ class SnakeClient(
         fun isNetworkUri(uri: Uri): Boolean {
             val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return true
             return scheme != "about" && scheme != "data" && scheme != "blob" && scheme != "javascript"
+        }
+
+        fun isSameHttpsHost(pageUrl: String?, authHost: String?): Boolean {
+            val host = authHost?.trim()?.lowercase(Locale.ROOT).orEmpty()
+            if (host.isEmpty() || pageUrl.isNullOrBlank()) return false
+            val uri = runCatching { Uri.parse(pageUrl) }.getOrNull() ?: return false
+            return uri.scheme.equals("https", ignoreCase = true) &&
+                uri.host?.lowercase(Locale.ROOT) == host
         }
     }
 }

@@ -42,6 +42,7 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             all {
+                it.maxHeapSize = "1024m"
                 it.systemProperty("robolectric.offline", "false")
             }
         }

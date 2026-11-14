@@ -3,11 +3,15 @@ package com.nromanovich.stealthsnake
 import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.net.Uri
+import android.os.Bundle
+import android.provider.Browser
 import android.view.View
 import android.view.WindowManager
 import android.webkit.CookieManager
@@ -485,6 +489,38 @@ class MainActivityTest {
 
         controller.pause().destroy()
         assertFalse(SnakePreferences(activity).sessionDirty)
+    }
+
+    @Test
+    fun `incoming ACTION_VIEW external link strips EXTRA_HEADERS and opens in isolated session`() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        ShadowLooper.idleMainLooper()
+
+        val initialSession = activity.getActiveSessionForTest()
+        assertEquals(1, activity.getSessionsForTest().size)
+
+        val untrustedHeaders = Bundle().apply { putString("X-Tracking-Token", "leak") }
+        val externalIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.org/deep?x=1")).apply {
+            putExtra(Browser.EXTRA_HEADERS, untrustedHeaders)
+        }
+        controller.newIntent(externalIntent)
+        ShadowLooper.idleMainLooper()
+
+        assertEquals(2, activity.getSessionsForTest().size)
+        val extSession = activity.getActiveSessionForTest()
+        assertTrue(extSession !== initialSession)
+        assertTrue(extSession.webViewProfileName != initialSession.webViewProfileName)
+        assertTrue(extSession.sessionSeed != initialSession.sessionSeed)
+        assertEquals("https://example.org/deep?x=1", Shadows.shadowOf(extSession.webView).lastLoadedUrl)
+        assertFalse(activity.intent.hasExtra(Browser.EXTRA_HEADERS))
+
+        // Non-http(s) external intents must be ignored without creating a session.
+        controller.newIntent(Intent(Intent.ACTION_VIEW, Uri.parse("file:///etc/passwd")))
+        ShadowLooper.idleMainLooper()
+        assertEquals(2, activity.getSessionsForTest().size)
+
+        controller.pause().destroy()
     }
 
     private fun findEditText(view: View): EditText? {
