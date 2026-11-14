@@ -8,6 +8,7 @@ import android.widget.CompoundButton
 import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
+import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -157,9 +158,22 @@ class SettingsAndCapturesTest {
 
         val listCtrl = Robolectric.buildActivity(CapturesActivity::class.java).setup()
         val listRoot = (listCtrl.get().findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
+        val recycler = findRecyclerView(listRoot)
+        assertNotNull(recycler)
+        assertEquals(1, recycler!!.adapter?.itemCount)
         assertNotNull(findTextViewContaining(listRoot, "capture_test.png"))
         listCtrl.pause().destroy()
         capturesDir.deleteRecursively()
+    }
+
+    private fun findRecyclerView(view: View): RecyclerView? {
+        if (view is RecyclerView) return view
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                findRecyclerView(view.getChildAt(i))?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun findSwitchWithText(view: View, text: String): CompoundButton? {

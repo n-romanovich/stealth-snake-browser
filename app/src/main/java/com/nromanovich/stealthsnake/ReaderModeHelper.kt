@@ -7,8 +7,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.widget.Button
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.TableLayout
+import android.widget.TableRow
 import android.widget.TextView
 import org.json.JSONObject
 
@@ -22,12 +25,16 @@ object ReaderModeHelper {
         HEADING,
         QUOTE,
         LIST_ITEM,
+        CODE,
+        TABLE,
         PARAGRAPH
     }
 
     data class Block(
         val kind: BlockKind,
-        val text: String
+        val text: String,
+        val headingLevel: Int = 2,
+        val tableRows: List<List<String>> = emptyList()
     )
 
     data class Article(
@@ -37,7 +44,7 @@ object ReaderModeHelper {
         val blocks: List<Block> = paragraphs.map { Block(BlockKind.PARAGRAPH, it) }
     ) {
         val isEmpty: Boolean
-            get() = paragraphs.isEmpty()
+            get() = paragraphs.isEmpty() && blocks.isEmpty()
     }
 
     private const val EXTRACT_SCRIPT = """
@@ -82,21 +89,60 @@ object ReaderModeHelper {
 
             var blocks = [];
             var seen = {};
-            var nodes = best ? best.querySelectorAll('h2, h3, blockquote, li, p') : [];
+            var nodes = best ? best.querySelectorAll('h1, h2, h3, h4, h5, h6, pre, code, table, blockquote, li, p') : [];
             for (var k = 0; k < nodes.length; k++) {
               var n = nodes[k];
               if (!isVisible(n)) continue;
               if (n.closest && n.closest('nav, header, footer, aside')) continue;
-              if (n.tagName === 'P' && n.closest && n.closest('blockquote, li')) continue;
+              var tag = n.tagName;
+              if (tag !== 'TABLE' && n.closest && n.closest('table')) continue;
+              if (tag === 'PRE' && n.parentElement && n.parentElement.closest && n.parentElement.closest('pre')) continue;
+              if (tag !== 'PRE' && n.closest && n.closest('pre')) continue;
+              if (tag === 'P' && n.closest && n.closest('blockquote, li')) continue;
+              if (tag === 'TABLE') {
+                var trs = n.querySelectorAll('tr');
+                var rows = [];
+                for (var r = 0; r < trs.length && r < 60; r++) {
+                  var cells = trs[r].querySelectorAll('th, td');
+                  if (!cells.length) continue;
+                  var row = [];
+                  for (var c = 0; c < cells.length && c < 12; c++) {
+                    row.push((cells[c].innerText || '').replace(/\s+/g, ' ').trim());
+                  }
+                  if (row.some(function(cell){ return cell.length > 0; })) rows.push(row);
+                }
+                if (!rows.length) continue;
+                var flat = rows.map(function(row){ return row.join(' | '); }).join('\n');
+                if (seen['tbl:' + flat]) continue;
+                seen['tbl:' + flat] = true;
+                blocks.push({ kind: 'table', text: flat, rows: rows });
+                continue;
+              }
+              if (tag === 'PRE' || tag === 'CODE') {
+                var codeText = (n.textContent || '').replace(/\r\n/g, '\n').trim();
+                if (tag === 'CODE' && n.closest && n.closest('p, li, h1, h2, h3, h4, h5, h6, blockquote') &&
+                    codeText.indexOf('\n') === -1 && codeText.length < 40) {
+                  continue;
+                }
+                if (codeText.length < 4 || seen['code:' + codeText]) continue;
+                seen['code:' + codeText] = true;
+                blocks.push({ kind: 'code', text: codeText });
+                continue;
+              }
+              var isHeading = /^H[1-6]$/.test(tag);
               var t = (n.innerText || '').replace(/\s+/g, ' ').trim();
-              var minLen = (n.tagName === 'H2' || n.tagName === 'H3') ? 2 : 20;
+              var minLen = isHeading ? 2 : (tag === 'LI' ? 3 : 20);
               if (t.length < minLen || seen[t]) continue;
               seen[t] = true;
-              var kind = 'paragraph';
-              if (n.tagName === 'H2' || n.tagName === 'H3') kind = 'heading';
-              else if (n.tagName === 'BLOCKQUOTE') kind = 'quote';
-              else if (n.tagName === 'LI') kind = 'list_item';
-              blocks.push({ kind: kind, text: t });
+              if (isHeading) {
+                blocks.push({ kind: 'heading', level: parseInt(tag.substring(1), 10) || 2, text: t });
+              } else if (tag === 'BLOCKQUOTE') {
+                blocks.push({ kind: 'quote', text: t });
+              } else if (tag === 'LI') {
+                blocks.push({ kind: 'list_item', text: t });
+              } else {
+                blocks.push({ kind: 'paragraph', text: t });
+              }
             }
 
             if (blocks.length === 0 && best) {
@@ -153,15 +199,45 @@ object ReaderModeHelper {
                 buildList {
                     for (i in 0 until blocksArr.length()) {
                         val bObj = blocksArr.optJSONObject(i) ?: continue
-                        val text = bObj.optString("text", "").trim()
-                        if (text.isEmpty()) continue
                         val kind = when (bObj.optString("kind", "paragraph")) {
                             "heading" -> BlockKind.HEADING
                             "quote" -> BlockKind.QUOTE
                             "list_item" -> BlockKind.LIST_ITEM
+                            "code" -> BlockKind.CODE
+                            "table" -> BlockKind.TABLE
                             else -> BlockKind.PARAGRAPH
                         }
-                        add(Block(kind, text))
+                        val headingLevel = if (kind == BlockKind.HEADING) {
+                            bObj.optInt("level", 2).coerceIn(1, 6)
+                        } else {
+                            2
+                        }
+                        val tableRows = if (kind == BlockKind.TABLE) {
+                            val rowsJson = bObj.optJSONArray("rows")
+                            buildList {
+                                if (rowsJson != null) {
+                                    for (r in 0 until rowsJson.length()) {
+                                        val rowJson = rowsJson.optJSONArray(r) ?: continue
+                                        val row = buildList {
+                                            for (c in 0 until rowJson.length()) {
+                                                add(rowJson.optString(c, "").trim())
+                                            }
+                                        }
+                                        if (row.any { it.isNotEmpty() }) add(row)
+                                    }
+                                }
+                            }
+                        } else {
+                            emptyList()
+                        }
+                        val rawText = bObj.optString("text", "").trim()
+                        val finalText = if (rawText.isEmpty() && tableRows.isNotEmpty()) {
+                            tableRows.joinToString("\n") { it.joinToString(" | ") }
+                        } else {
+                            rawText
+                        }
+                        if (finalText.isEmpty()) continue
+                        add(Block(kind = kind, text = finalText, headingLevel = headingLevel, tableRows = tableRows))
                     }
                 }
             } else {
@@ -198,13 +274,25 @@ object ReaderModeHelper {
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(colors.text)
         }
-        val bodyViews = mutableListOf<Pair<BlockKind, TextView>>()
+        val bodyViews = mutableListOf<Triple<BlockKind, Int, TextView>>()
         lateinit var smallerBtn: Button
         lateinit var largerBtn: Button
 
+        fun resolveTextSize(kind: BlockKind, headingLevel: Int): Float = when (kind) {
+            BlockKind.HEADING -> when (headingLevel.coerceIn(1, 6)) {
+                1 -> fontSizeSp + 4f
+                2 -> fontSizeSp + 2f
+                3 -> fontSizeSp + 1f
+                else -> fontSizeSp
+            }
+            BlockKind.CODE -> (fontSizeSp - 2.5f).coerceAtLeast(11f)
+            BlockKind.TABLE -> (fontSizeSp - 2f).coerceAtLeast(11.5f)
+            else -> fontSizeSp
+        }
+
         fun applyFontSize() {
-            bodyViews.forEach { (kind, tv) ->
-                tv.textSize = if (kind == BlockKind.HEADING) fontSizeSp + 2f else fontSizeSp
+            bodyViews.forEach { (kind, level, tv) ->
+                tv.textSize = resolveTextSize(kind, level)
             }
             smallerBtn.isEnabled = fontSizeSp > 13f
             smallerBtn.alpha = if (smallerBtn.isEnabled) 1f else 0.4f
@@ -283,14 +371,14 @@ object ReaderModeHelper {
                 BlockKind.HEADING -> {
                     val tv = TextView(activity).apply {
                         text = block.text
-                        textSize = fontSizeSp + 2f
+                        textSize = resolveTextSize(block.kind, block.headingLevel)
                         setTypeface(typeface, Typeface.BOLD)
                         setLineSpacing(0f, 1.25f)
                         setTextColor(colors.text)
                         setTextIsSelectable(true)
                         setPadding(0, (10 * density).toInt(), 0, (8 * density).toInt())
                     }
-                    bodyViews.add(block.kind to tv)
+                    bodyViews.add(Triple(block.kind, block.headingLevel, tv))
                     articleCol.addView(tv)
                 }
                 BlockKind.QUOTE -> {
@@ -315,7 +403,7 @@ object ReaderModeHelper {
                     }
                     quoteRow.addView(bar)
                     quoteRow.addView(tv)
-                    bodyViews.add(block.kind to tv)
+                    bodyViews.add(Triple(block.kind, block.headingLevel, tv))
                     articleCol.addView(quoteRow)
                 }
                 BlockKind.LIST_ITEM -> {
@@ -327,8 +415,77 @@ object ReaderModeHelper {
                         setTextIsSelectable(true)
                         setPadding((8 * density).toInt(), 0, 0, (10 * density).toInt())
                     }
-                    bodyViews.add(block.kind to tv)
+                    bodyViews.add(Triple(block.kind, block.headingLevel, tv))
                     articleCol.addView(tv)
+                }
+                BlockKind.CODE -> {
+                    val codeScroll = HorizontalScrollView(activity).apply {
+                        isHorizontalScrollBarEnabled = true
+                        background = SnakeTheme.roundedSurface(colors.card, colors.stroke, 12f, density)
+                        val padH = (12 * density).toInt()
+                        val padV = (10 * density).toInt()
+                        setPadding(padH, padV, padH, padV)
+                        layoutParams = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            bottomMargin = (14 * density).toInt()
+                        }
+                    }
+                    val tv = TextView(activity).apply {
+                        text = block.text
+                        typeface = Typeface.MONOSPACE
+                        textSize = resolveTextSize(block.kind, block.headingLevel)
+                        setLineSpacing(0f, 1.3f)
+                        setTextColor(colors.text)
+                        setTextIsSelectable(true)
+                        setHorizontallyScrolling(true)
+                    }
+                    codeScroll.addView(tv)
+                    bodyViews.add(Triple(block.kind, block.headingLevel, tv))
+                    articleCol.addView(codeScroll)
+                }
+                BlockKind.TABLE -> {
+                    val tableScroll = HorizontalScrollView(activity).apply {
+                        isHorizontalScrollBarEnabled = true
+                        background = SnakeTheme.roundedSurface(colors.card, colors.stroke, 12f, density)
+                        val pad = (8 * density).toInt()
+                        setPadding(pad, pad, pad, pad)
+                        layoutParams = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            bottomMargin = (14 * density).toInt()
+                        }
+                    }
+                    val tableLayout = TableLayout(activity).apply {
+                        isShrinkAllColumns = false
+                    }
+                    val rows = block.tableRows.ifEmpty {
+                        block.text.lines()
+                            .filter { it.isNotBlank() }
+                            .map { line -> line.split('|').map { it.trim() } }
+                    }
+                    val cellPadH = (10 * density).toInt()
+                    val cellPadV = (6 * density).toInt()
+                    rows.forEachIndexed { rIdx, rowCells ->
+                        val tableRow = TableRow(activity)
+                        for (cellText in rowCells) {
+                            val cellTv = TextView(activity).apply {
+                                text = cellText
+                                textSize = resolveTextSize(block.kind, block.headingLevel)
+                                setTypeface(null, if (rIdx == 0) Typeface.BOLD else Typeface.NORMAL)
+                                setTextColor(if (rIdx == 0) colors.accent else colors.text)
+                                setTextIsSelectable(true)
+                                setPadding(cellPadH, cellPadV, cellPadH, cellPadV)
+                            }
+                            bodyViews.add(Triple(block.kind, block.headingLevel, cellTv))
+                            tableRow.addView(cellTv)
+                        }
+                        tableLayout.addView(tableRow)
+                    }
+                    tableScroll.addView(tableLayout)
+                    articleCol.addView(tableScroll)
                 }
                 BlockKind.PARAGRAPH -> {
                     val tv = TextView(activity).apply {
@@ -339,7 +496,7 @@ object ReaderModeHelper {
                         setTextIsSelectable(true)
                         setPadding(0, 0, 0, (14 * density).toInt())
                     }
-                    bodyViews.add(block.kind to tv)
+                    bodyViews.add(Triple(block.kind, block.headingLevel, tv))
                     articleCol.addView(tv)
                 }
             }

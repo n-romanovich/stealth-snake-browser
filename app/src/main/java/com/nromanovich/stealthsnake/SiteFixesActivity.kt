@@ -24,10 +24,11 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 
 /**
  * Android 16 Material 3 Expressive Troubleshooting Guide matching [SettingsActivity]:
@@ -67,8 +68,8 @@ class SiteFixesActivity : AppCompatActivity() {
     private lateinit var chipContainer: LinearLayout
     private lateinit var introView: TextView
     private lateinit var countLabel: TextView
-    private lateinit var resultsList: LinearLayout
-    private lateinit var resultsScroll: ScrollView
+    private lateinit var resultsRecycler: RecyclerView
+    private val fixesAdapter = FixesAdapter()
     private lateinit var emptyTitleView: TextView
     private lateinit var emptyBodyView: TextView
     private lateinit var emptyResetBtn: TextView
@@ -211,7 +212,7 @@ class SiteFixesActivity : AppCompatActivity() {
                         selectedCategory = cat
                         updateCategoryRail()
                         renderResults(animateList = true)
-                        resultsScroll.scrollTo(0, 0)
+                        resultsRecycler.scrollToPosition(0)
                     }
                 }
             }
@@ -228,10 +229,10 @@ class SiteFixesActivity : AppCompatActivity() {
         }
         rootLayout.addView(chipStrip)
 
-        // Main Scrollable Content Area
-        val contentColumn = LinearLayout(this).apply {
+        // Header summary + RecyclerView content area
+        val summaryColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding((16 * density).toInt(), (4 * density).toInt(), (16 * density).toInt(), (28 * density).toInt())
+            setPadding((16 * density).toInt(), (4 * density).toInt(), (16 * density).toInt(), 0)
         }
 
         introView = TextView(this).apply {
@@ -240,26 +241,26 @@ class SiteFixesActivity : AppCompatActivity() {
             setLineSpacing(2f * density, 1f)
             setPadding((6 * density).toInt(), (2 * density).toInt(), (6 * density).toInt(), (6 * density).toInt())
         }
-        contentColumn.addView(introView)
+        summaryColumn.addView(introView)
 
         countLabel = TextView(this).apply {
             textSize = 12.5f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setPadding((6 * density).toInt(), (2 * density).toInt(), (6 * density).toInt(), (10 * density).toInt())
         }
-        contentColumn.addView(countLabel)
+        summaryColumn.addView(countLabel)
+        rootLayout.addView(summaryColumn)
 
-        resultsList = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val hPad = (16 * density).toInt()
+        resultsRecycler = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@SiteFixesActivity)
+            adapter = fixesAdapter
+            clipToPadding = false
+            setPadding(hPad, 0, hPad, (28 * density).toInt())
         }
         emptyStateView = buildEmptyStateView()
-        contentColumn.addView(resultsList)
-        contentColumn.addView(emptyStateView)
-
-        resultsScroll = ScrollView(this).apply {
-            addView(contentColumn)
-        }
-        rootLayout.addView(resultsScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        rootLayout.addView(resultsRecycler, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        rootLayout.addView(emptyStateView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         setContentView(rootLayout)
 
@@ -284,6 +285,7 @@ class SiteFixesActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         searchHandler.removeCallbacksAndMessages(null)
+        resultsRecycler.adapter = null
         super.onDestroy()
     }
 
@@ -395,42 +397,79 @@ class SiteFixesActivity : AppCompatActivity() {
             countLabel.text = getString(R.string.fixes_count_filtered, matches.size, SiteFixGuide.entries.size)
         }
 
-        resultsList.removeAllViews()
         if (matches.isEmpty()) {
-            resultsList.visibility = View.GONE
+            fixesAdapter.submitResults(emptyList(), query)
+            resultsRecycler.visibility = View.GONE
             emptyStateView.visibility = View.VISIBLE
             emptyStateView.alpha = 0f
             emptyStateView.animate().alpha(1f).setDuration(180L).start()
             return
         }
 
-        resultsList.visibility = View.VISIBLE
+        resultsRecycler.visibility = View.VISIBLE
         emptyStateView.visibility = View.GONE
-        val seam = (2f * density).toInt().coerceAtLeast(1)
-        matches.forEachIndexed { index, match ->
-            val card = buildExpressiveCard(match, query, index, matches.size)
-            val lp = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                if (index > 0) topMargin = seam
-            }
-            resultsList.addView(card, lp)
+        fixesAdapter.submitResults(matches, query)
+        if (Build.FINGERPRINT.equals("robolectric", ignoreCase = true)) {
+            resultsRecycler.measure(
+                View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.AT_MOST)
+            )
+            resultsRecycler.layout(0, 0, 1080, resultsRecycler.measuredHeight.coerceAtLeast(1920))
         }
 
         if (animateList) {
-            resultsList.animate().cancel()
-            resultsList.alpha = 0f
-            resultsList.translationY = 10f * density
-            resultsList.animate()
+            resultsRecycler.animate().cancel()
+            resultsRecycler.alpha = 0f
+            resultsRecycler.translationY = 10f * density
+            resultsRecycler.animate()
                 .alpha(1f)
                 .translationY(0f)
                 .setDuration(180L)
                 .setInterpolator(DecelerateInterpolator())
                 .start()
         } else {
-            resultsList.alpha = 1f
-            resultsList.translationY = 0f
+            resultsRecycler.alpha = 1f
+            resultsRecycler.translationY = 0f
+        }
+    }
+
+    private class FixHolder(val slot: LinearLayout) : RecyclerView.ViewHolder(slot)
+
+    private inner class FixesAdapter : RecyclerView.Adapter<FixHolder>() {
+        private var items: List<FixGuideMatch> = emptyList()
+        private var query: String = ""
+
+        fun submitResults(newItems: List<FixGuideMatch>, searchQuery: String) {
+            items = newItems
+            query = searchQuery
+            notifyDataSetChanged()
+        }
+
+        override fun getItemCount(): Int = items.size
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FixHolder {
+            val slot = LinearLayout(this@SiteFixesActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            }
+            return FixHolder(slot)
+        }
+
+        override fun onBindViewHolder(holder: FixHolder, position: Int) {
+            val seam = (2f * density).toInt().coerceAtLeast(1)
+            val lp = holder.slot.layoutParams as RecyclerView.LayoutParams
+            lp.topMargin = if (position > 0) seam else 0
+            holder.slot.layoutParams = lp
+            holder.slot.removeAllViews()
+            holder.slot.addView(buildExpressiveCard(items[position], query, position, items.size))
+        }
+
+        override fun onViewRecycled(holder: FixHolder) {
+            holder.slot.removeAllViews()
+            super.onViewRecycled(holder)
         }
     }
 

@@ -187,6 +187,66 @@ class SessionsAndUiTest {
     }
 
     @Test
+    fun `reader mode supports code blocks, tables, and h1-h6 heading scaling`() {
+        val json = """
+            {
+              "title": "Tech Doc",
+              "byline": "docs.example",
+              "paragraphs": ["Overview", "val x = 1", "ColA | ColB"],
+              "blocks": [
+                {"kind": "heading", "level": 1, "text": "Overview"},
+                {"kind": "heading", "level": 4, "text": "Details"},
+                {"kind": "code", "text": "fun hello() {\n  println(42)\n}"},
+                {"kind": "table", "text": "ColA | ColB", "rows": [["ColA", "ColB"], ["1", "2"]]}
+              ]
+            }
+        """.trimIndent()
+        val article = ReaderModeHelper.parseEvaluateResult(json)!!
+        assertEquals(4, article.blocks.size)
+        assertEquals(1, article.blocks[0].headingLevel)
+        assertEquals(4, article.blocks[1].headingLevel)
+        assertEquals(ReaderModeHelper.BlockKind.CODE, article.blocks[2].kind)
+        assertEquals(ReaderModeHelper.BlockKind.TABLE, article.blocks[3].kind)
+        assertEquals(2, article.blocks[3].tableRows.size)
+
+        val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        val activity = controller.get()
+        val overlay = ReaderModeHelper.buildOverlayView(
+            activity = activity,
+            palette = SnakePreferences(activity).themePalette,
+            article = article,
+            onClose = {}
+        )
+        val h1 = findTextView(overlay, "Overview")!!
+        val h4 = findTextView(overlay, "Details")!!
+        assertTrue(h1.textSize > h4.textSize)
+        val codeTv = findTextView(overlay, "fun hello() {\n  println(42)\n}")!!
+        assertEquals(android.graphics.Typeface.MONOSPACE, codeTv.typeface)
+        assertTrue(codeTv.isTextSelectable)
+        assertNotNull(findFirst<android.widget.TableLayout>(overlay))
+        assertNotNull(findTextView(overlay, "ColA"))
+        assertNotNull(findTextView(overlay, "2"))
+        controller.pause().destroy()
+    }
+
+    @Test
+    fun `site fixes activity uses RecyclerView and filters search results`() {
+        val controller = Robolectric.buildActivity(SiteFixesActivity::class.java).setup()
+        val activity = controller.get()
+        val root = (activity.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
+        val recycler = findFirst<androidx.recyclerview.widget.RecyclerView>(root)
+        assertNotNull(recycler)
+        assertTrue((recycler!!.adapter?.itemCount ?: 0) > 0)
+
+        val searchBox = findFirst<EditText>(root)!!
+        searchBox.setText("WebGL")
+        ShadowLooper.idleMainLooper()
+        assertTrue((recycler.adapter?.itemCount ?: 0) >= 1)
+        assertTrue(recycler.adapter!!.itemCount < SiteFixGuide.entries.size)
+        controller.pause().destroy()
+    }
+
+    @Test
     fun `unified user agent uses reduced Chrome major template without device model leak`() {
         val ua = MainActivity.buildUnifiedUserAgent(131)
         assertEquals(
