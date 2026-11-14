@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="snake_bg">#FF131313</color>
+    <color name="snake_accent">#FFD99B4E</color>
+    <color name="snake_muted">#FF8E8E93</color>
+</resources>

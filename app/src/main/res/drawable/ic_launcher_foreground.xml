@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Clean, flat Material emblem silhouette with Stealth Snake S-serpent cutout -->
+    <path
+        android:fillColor="#DDE4EE"
+        android:pathData="M54,28L76,36.5V53C76,67.2 66.5,78.4 54,82.5C41.5,78.4 32,67.2 32,53V36.5L54,28Z" />
+    <path
+        android:fillColor="#16191D"
+        android:pathData="M62.5,41.5L67,39L64.5,44.5C64.5,48.5 60.5,51.2 54.5,52.8C49.5,54.1 47.2,55.6 47.2,58.2C47.2,60.7 49.6,62.3 53.6,62.3C57.6,62.3 60.8,60.5 63.3,58.2L66.3,61.6C62.9,64.9 58.6,67 53.4,67C46.4,67 41.8,63.3 41.8,58.1C41.8,52.9 46.1,50 52.5,48.4C57.4,47.2 59.3,45.8 59.3,43.7C59.3,41.8 57.1,40.4 53.8,40.4C50.3,40.4 47.4,41.9 45.2,44.1L42.1,40.8C45.3,37.7 49.4,36 54.1,36C57.8,36 60.7,37.2 62.5,39.2L62.5,41.5Z" />
+</vector>

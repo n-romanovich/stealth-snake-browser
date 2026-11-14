@@ -1,0 +1,65 @@
+# Stealth Snake blocklist.
+#
+# Rule syntax (one rule per line, lowercase, no spaces):
+#   ||example.com   blocks example.com and every subdomain (sub-resources only)
+#   path:/beacon    blocks sub-resource requests whose path equals /beacon or starts with /beacon/
+# Main-frame navigations are never blocked.
+
+# Analytics and tag managers
+||google-analytics.com
+||analytics.google.com
+||googletagmanager.com
+||googletagservices.com
+||doubleclick.net
+||googlesyndication.com
+||adservice.google.com
+||scorecardresearch.com
+||quantserve.com
+||segment.io
+||segment.com
+||mixpanel.com
+||amplitude.com
+||heap.io
+||heapanalytics.com
+||clarity.ms
+||hotjar.com
+||hotjar.io
+||fullstory.com
+||mouseflow.com
+||crazyegg.com
+||luckyorange.com
+||newrelic.com
+||nr-data.net
+||sentry.io
+||bugsnag.com
+||datadoghq.com
+||logrocket.com
+||logrocket.io
+
+# Social and advertising trackers
+||connect.facebook.net
+||criteo.com
+||criteo.net
+||adnxs.com
+||taboola.com
+||outbrain.com
+||rubiconproject.com
+||pubmatic.com
+||openx.net
+||adsrvr.org
+
+# Fingerprinting and anti-fraud collectors
+||fingerprint.com
+||fpjs.io
+||fpcdn.io
+||datadome.co
+||perimeterx.net
+||px-cloud.net
+||px-cdn.net
+||pxchk.net
+||kasada.io
+
+# Generic telemetry endpoints
+path:/beacon
+path:/collect
+path:/telemetry

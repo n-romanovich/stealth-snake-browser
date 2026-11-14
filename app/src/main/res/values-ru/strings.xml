@@ -1,0 +1,503 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Stealth Snake</string>
+    <string name="url_hint">Поиск или адрес сайта</string>
+
+    <!-- Toolbar & Chrome-like controls -->
+    <string name="btn_home">Домой</string>
+    <string name="btn_back">Назад</string>
+    <string name="btn_forward">Вперёд</string>
+    <string name="btn_reload">Обновить</string>
+    <string name="btn_copy_url">Копировать ссылку</string>
+    <string name="btn_find_in_page">Поиск по странице</string>
+    <string name="btn_capture">Скриншот</string>
+    <string name="btn_wipe">Очистить сессию</string>
+    <string name="btn_new_tab">Новая изолированная сессия</string>
+    <string name="btn_tabs_placeholder">1</string>
+    <string name="session_single_tab_hint">Одна изолированная сессия — нажмите +, чтобы начать заново</string>
+    <string name="btn_menu">Меню</string>
+    <string name="btn_clear_url">Очистить адрес</string>
+    <string name="btn_site_info">Сведения о подключении</string>
+    <string name="btn_settings">Настройки</string>
+    <string name="btn_captures_viewer">Скрытые скриншоты</string>
+    <string name="url_copied">Ссылка скопирована</string>
+    <string name="find_hint">Найти на странице…</string>
+    <string name="find_count_format">%1$d/%2$d</string>
+
+    <!-- Empty start page -->
+    <string name="start_card_title">Пустая страница</string>
+    <string name="start_card_body">Введите адрес сверху или выберите домашнюю страницу.</string>
+    <string name="start_card_configure">Выбрать стартовую</string>
+    <string name="start_card_dismiss">Скрыть</string>
+
+    <!-- Downloads -->
+    <string name="download_started">Загрузка %1$s…</string>
+    <string name="download_saved">Сохранено в Загрузки: %1$s</string>
+    <string name="download_failed">Ошибка загрузки</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_title_1">Добро пожаловать в Stealth Snake</string>
+    <string name="onboarding_body_1">Изолированный браузер с минимумом прав (только Интернет), DocumentStart-защитой от фингерпринтинга и без фоновой телеметрии.</string>
+    <string name="onboarding_title_2">Текущее состояние защиты</string>
+    <string name="onboarding_body_2">• Пресет: %1$s\n• Аккаунты (cookies): %2$s\n• Скриншоты: %3$s\n• Стартовая: %4$s</string>
+    <string name="onboarding_accounts_ephemeral">Стираются при выходе (Авто-Wipe ВКЛ)</string>
+    <string name="onboarding_accounts_saved">Сохраняются между запусками (Авто-Wipe ВЫКЛ)</string>
+    <string name="onboarding_title_3">Быстрое управление</string>
+    <string name="onboarding_body_3">• Кнопка + полностью сбрасывает сессию и меняет seed отпечатка.\n• Свайп вниз вверху страницы — обновление.\n• Меню ⋮ — скриншоты, поиск по странице и настройки.</string>
+    <string name="onboarding_next">Далее</string>
+    <string name="onboarding_done">Начать</string>
+    <string name="onboarding_skip">Пропустить</string>
+
+    <!-- Status & Capture feedback -->
+    <string name="status_ready">Защита активна</string>
+    <string name="status_captured">Сохранено в песочницу (%1$s)</string>
+    <string name="status_captured_gallery">Сохранено в Галерею (%1$s)</string>
+    <string name="status_capture_failed">Ошибка снимка</string>
+    <string name="status_wiped">Сессия очищена</string>
+    <string name="status_new_session">Открыта новая изолированная сессия</string>
+    <plurals name="status_blocked">
+        <item quantity="one">Защита активна · заблокирован %1$d трекер</item>
+        <item quantity="few">Защита активна · заблокировано %1$d трекера</item>
+        <item quantity="many">Защита активна · заблокировано %1$d трекеров</item>
+        <item quantity="other">Защита активна · заблокировано %1$d трекеров</item>
+    </plurals>
+
+    <!-- Capture choice & Info dialog -->
+    <string name="capture_choice_title">Куда сохранять скриншоты?</string>
+    <string name="capture_choice_message">Выберите хранилище по умолчанию. Его всегда можно изменить в Настройках.</string>
+    <string name="capture_choice_private">Скрытое хранилище</string>
+    <string name="capture_choice_gallery">В Галерею</string>
+    <string name="capture_info_title">Зачем нужно скрытое хранилище?</string>
+    <string name="capture_info_body">• Изоляция от приложений: снимки лежат внутри песочницы (filesDir/captures), другие приложения с доступом к фото их не видят.\n\n• Нет метаданных MediaStore: Галерея индексирует точное время съёмки и пакет-владелец (com.nromanovich.stealthsnake).\n\n• Нет автовыгрузки в облако: снимки не улетят в Google Фото или облачный бэкап.\n\n• Автоочистка: скрытые снимки можно удалять при Wipe сессии.</string>
+    <string name="action_ok">Понятно</string>
+    <string name="action_cancel">Отмена</string>
+    <string name="action_open">Открыть</string>
+    <string name="action_export_gallery">В Галерею</string>
+    <string name="action_delete">Удалить</string>
+
+    <!-- Wipe confirmation -->
+    <string name="wipe_confirm_title">Очистить текущую сессию?</string>
+    <string name="wipe_confirm_message">Куки, кэш, хранилище и история будут удалены, а seed фингерпринта перегенерирован.</string>
+
+    <!-- Captures viewer -->
+    <string name="captures_title">Скрытые скриншоты</string>
+    <string name="captures_empty">Скрытых скриншотов пока нет.</string>
+    <string name="captures_exported">Экспортировано в Галерею</string>
+    <string name="captures_export_failed">Ошибка экспорта</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Настройки</string>
+    <string name="settings_search_hint">Поиск настроек</string>
+    <string name="settings_search_empty">Ничего не найдено</string>
+    <string name="hub_group_everyday">Основное</string>
+    <string name="hub_group_privacy">Приватность, доступ и файлы</string>
+    <string name="hub_group_network_snake">Сеть и защита от слежки</string>
+    <string name="hub_group_about">Система</string>
+    <string name="cat_hub_presets">Профили защиты</string>
+    <string name="cat_hub_search_home">Поиск и стартовая страница</string>
+    <string name="cat_hub_appearance">Внешний вид и экран</string>
+    <string name="cat_hub_pin">Блокировка PIN-кодом</string>
+    <string name="cat_hub_wipe">Сессия и очистка (Wipe)</string>
+    <string name="cat_hub_downloads">Загрузки и скриншоты</string>
+    <string name="cat_hub_vpn">VPN и сетевая защита</string>
+    <string name="cat_hub_blocking">Блокировка рекламы и трекеров</string>
+    <string name="cat_hub_antifp">Антифингерпринтинг и поведение</string>
+    <string name="cat_hub_about">О браузере и сброс</string>
+    <string name="state_on_short">Вкл</string>
+    <string name="state_off_short">Выкл</string>
+    <string name="hub_sub_pin_on">Включена</string>
+    <string name="hub_sub_pin_off">Отключена</string>
+    <string name="hub_sub_wipe">Авто-Wipe при выходе: %1$s</string>
+    <string name="hub_sub_downloads">Загрузки: %1$s · Скриншоты: %2$s</string>
+    <string name="hub_sub_vpn">Kill-Switch: %1$s · Блок WebRTC: %2$s</string>
+    <string name="hub_sub_blocking">Блоклист: %1$s · Свои правила: %2$d</string>
+    <string name="hub_sub_antifp">Щитов: %1$d · Микро-джиттер: %2$s</string>
+    <string name="hub_sub_about">Версия %1$s · GitHub и сброс</string>
+    <string name="settings_presets">Пресет защиты</string>
+    <string name="preset_max_stealth">Макс. стелс</string>
+    <string name="preset_compatibility">Совместимость</string>
+    <string name="preset_custom">Свой</string>
+
+    <string name="cat_capture">Скриншоты и хранилище</string>
+    <string name="pref_capture_mode">Куда сохранять скриншоты</string>
+    <string name="capture_mode_ask">Спрашивать при первом нажатии</string>
+    <string name="capture_mode_private">Всегда в скрытое хранилище</string>
+    <string name="capture_mode_gallery">Всегда в Галерею</string>
+    <string name="pref_auto_clear_captures">Очищать скриншоты при Wipe</string>
+    <string name="pref_why_hidden_storage">Зачем скрытое хранилище?</string>
+
+    <string name="cat_navigation">Навигация и удобство (QoL)</string>
+    <string name="pref_home_url">Домашняя страница</string>
+    <string name="pref_search_engine">Поисковик</string>
+    <string name="search_ddg">DuckDuckGo</string>
+    <string name="search_startpage">Startpage</string>
+    <string name="search_brave">Brave Search</string>
+    <string name="search_off">Отключён</string>
+    <string name="pref_force_dark">Тёмная тема сайтов</string>
+    <string name="pref_text_zoom">Масштаб текста</string>
+
+    <string name="cat_network">Сеть и блокировка</string>
+    <string name="pref_builtin_blocklist">Блоклист трекеров</string>
+    <string name="pref_custom_blocklist">Свои правила (||domain или path:/prefix)</string>
+    <string name="pref_block_webrtc">Блокировать WebRTC ICE</string>
+    <string name="pref_block_beacons">Блокировать sendBeacon</string>
+
+    <string name="cat_antifp">Анти-фингерпринтинг</string>
+    <string name="pref_noise_canvas">Шум Canvas / WebGL</string>
+    <string name="pref_noise_audio">Шум WebAudio</string>
+    <string name="pref_hide_visibility">Фиксировать visibilityState</string>
+    <string name="pref_lock_viewport">Фиксировать Viewport</string>
+    <string name="pref_sensor_fallback">Заглушка сенсоров</string>
+    <string name="pref_fuzz_perf">Округление performance.now</string>
+
+    <string name="cat_behavioral">Поведенческая защита</string>
+    <string name="pref_jitter_enabled">Micro-Jitter</string>
+    <string name="pref_jitter_min">Мин. пауза простоя (сек)</string>
+    <string name="pref_jitter_max">Макс. пауза простоя (сек)</string>
+    <string name="pref_block_schemes">Блокировать внешние схемы (intent:, tel:)</string>
+    <string name="pref_suppress_dialogs">Подавлять JS-диалоги</string>
+
+    <string name="cat_session_ui">Сессия и интерфейс</string>
+    <string name="pref_language">Язык приложения</string>
+    <string name="lang_system">Как в системе</string>
+    <string name="lang_en">English</string>
+    <string name="lang_ru">Русский</string>
+    <string name="pref_confirm_wipe">Подтверждать Wipe</string>
+    <string name="pref_auto_wipe_exit">Авто-Wipe при выходе</string>
+    <string name="pref_auto_wipe_hint">Отключите, чтобы аккаунты (cookies) сохранялись между запусками.</string>
+    <string name="pref_block_screenshots">Блокировать скриншоты</string>
+    <string name="desc_block_screenshots">Включает FLAG_SECURE: скрывает превью в недавних и блокирует захват экрана.</string>
+    <string name="cat_downloads">Загрузки</string>
+    <string name="pref_downloads_enabled">Разрешить загрузки</string>
+    <string name="pref_downloads_hint">Выкл. по умолчанию от скрытых загрузок. При вкл. сохраняет в Downloads/StealthSnake.</string>
+    <string name="pref_theme_palette">Цветовая тема</string>
+    <string name="theme_obsidian">Obsidian Dark</string>
+    <string name="theme_amoled">AMOLED Black</string>
+    <string name="theme_midnight">Midnight Blue</string>
+    <string name="theme_emerald">Emerald Splash</string>
+    <string name="theme_slate_light">Slate Light</string>
+    <string name="pref_show_onboarding">Показать вступление снова</string>
+    <string name="cat_about">О приложении</string>
+    <string name="about_version_format">Stealth Snake v%1$s</string>
+    <string name="about_author">Автор: github.com/n-romanovich</string>
+    <string name="about_description">Лёгкий браузер для Android с упором на изоляцию, минимум разрешений и защиту от сбора данных.</string>
+    <string name="about_github_label">GitHub</string>
+    <string name="about_github_url">https://github.com/n-romanovich/stealth-snake-browser</string>
+    <string name="about_github_copied">Ссылка на GitHub скопирована</string>
+    <string name="pref_keep_screen_on">Не гасить экран</string>
+    <string name="pref_haptic">Виброотклик</string>
+    <string name="pref_show_status_bar">Строка статуса трекеров</string>
+    <string name="pref_reset_defaults">Сбросить настройки</string>
+    <string name="settings_reset_done">Настройки сброшены</string>
+
+    <!-- Settings section guide (left rail) -->
+    <string name="nav_presets">Пресеты</string>
+    <string name="nav_navigation">Основное</string>
+    <string name="nav_downloads">Загрузки</string>
+    <string name="nav_capture">Скриншоты</string>
+    <string name="nav_session">Сессия</string>
+    <string name="nav_appearance">Тема и язык</string>
+    <string name="nav_network">Сеть</string>
+    <string name="nav_antifp">Отпечаток</string>
+    <string name="nav_behavioral">Поведение</string>
+    <string name="nav_about">О программе</string>
+
+    <!-- Plain-language descriptions for every setting -->
+    <string name="desc_presets">«Макс. стелс» — вся защита; «Совместимость» — мягче для проблемных сайтов.</string>
+    <string name="desc_home_url">Открывается при запуске и по «Домой» (about:blank — пустая).</string>
+    <string name="desc_force_dark">Принудительно затемняет светлые сайты. Выключите, если где-то ломаются цвета.</string>
+    <string name="desc_auto_clear_captures">Удаляет скрытые скриншоты внутри приложения каждый раз при очистке сессии (Wipe).</string>
+    <string name="desc_confirm_wipe">Переспрашивает перед удалением cookies, кэша и истории, чтобы не сбросить сессию случайно.</string>
+    <string name="desc_keep_screen_on">Экран не тухнет, пока открыт браузер — удобно при чтении длинных страниц.</string>
+    <string name="desc_haptic">Короткая вибрация при создании скриншота и сбросе сессии.</string>
+    <string name="desc_show_status_bar">Тонкая полоска под адресной строкой со счётчиком заблокированных трекеров.</string>
+    <string name="desc_builtin_blocklist">Отсекает известные домены рекламы, аналитики и телеметрии ещё до загрузки.</string>
+    <string name="desc_block_webrtc">Скрывает ваш локальный IP в Wi-Fi или за VPN от WebRTC.</string>
+    <string name="desc_block_beacons">Блокирует фоновые запросы при закрытии или уходе со страницы.</string>
+    <string name="desc_noise_canvas">Добавляет шум в Canvas/WebGL для смены отпечатка в каждой сессии.</string>
+    <string name="desc_noise_audio">Добавляет шум в WebAudio для защиты от аудио-отпечатка.</string>
+    <string name="desc_hide_visibility">Сайты всегда считают вкладку активной, даже если она свёрнута.</string>
+    <string name="desc_lock_viewport">Блокирует события resize, скрывая размер окна и клавиатуры.</string>
+    <string name="desc_sensor_fallback">Отдаёт нейтральные данные вместо реальных показаний гироскопа.</string>
+    <string name="desc_fuzz_perf">Округляет таймеры до 20 мкс для защиты от тайминг-атак.</string>
+    <string name="desc_jitter_enabled">Редкие микро-сдвиги при простое для имитации живого чтения.</string>
+    <string name="desc_block_schemes">Запрещает ссылкам вроде intent:// или tel: открывать другие приложения на телефоне.</string>
+    <string name="desc_suppress_dialogs">Блокирует навязчивые всплывающие окна alert, confirm и prompt на сайтах.</string>
+
+    <!-- Compatibility warning & Site Fixes placeholder -->
+    <string name="compat_warn_title">Рекомендуем остаться на «Макс. стелс»</string>
+    <string name="compat_warn_body">«Макс. стелс» подходит для большинства сайтов. Если на конкретном ресурсе возникла проблема совместимости, лучше не ослаблять всю защиту сразу: откройте гайд, посмотрите какая опция мешает, и измените её точечно в отдельном профиле через «+».</string>
+    <string name="compat_warn_enable">Всё равно включить</string>
+    <string name="compat_warn_guide">Гайд</string>
+    <string name="pref_site_fixes_guide">Сайт не работает? Гайд</string>
+
+    <!-- Custom profiles -->
+    <string name="profile_add_desc">Создать свой профиль</string>
+    <string name="profile_create_title">Новый профиль настроек</string>
+    <string name="profile_create_hint">Название (например: Банк, Видео)</string>
+    <string name="profile_create_btn">Создать</string>
+    <string name="profile_created">Профиль «%1$s» создан</string>
+    <string name="profile_delete_title">Удалить профиль «%1$s»?</string>
+    <string name="profile_delete_btn">Удалить</string>
+    <string name="profiles_section_title">Свои профили</string>
+    <string name="profiles_hint">Сохраняют ваш набор настроек. Удерживайте профиль для удаления.</string>
+
+    <!-- Custom search engine -->
+    <string name="search_custom">Свой URL</string>
+    <string name="pref_custom_search_template">Шаблон своего поисковика</string>
+    <string name="desc_custom_search_template" formatted="false">Подставьте %s вместо запроса (напр.: https://searx.be/search?q=%s).</string>
+
+    <!-- VPN Kill-Switch -->
+    <string name="nav_vpn">VPN</string>
+    <string name="cat_vpn">VPN Kill-Switch</string>
+    <string name="pref_vpn_kill_switch">Блокировать запросы без VPN</string>
+    <string name="desc_vpn_kill_switch">Блокирует HTTP/HTTPS без активного VPN. Для полной блокировки сокетов включите «Постоянный VPN» в Android.</string>
+    <string name="pref_vpn_bypass_start">Открывать стартовую сразу</string>
+    <string name="desc_vpn_bypass_start">Сразу открывает стартовую, не дожидаясь VPN (сеть всё равно блокируется).</string>
+
+    <string name="vpn_blocked_title">VPN не подключён</string>
+    <string name="vpn_blocked_body">Включён VPN Kill-Switch. Загрузка страниц и сетевые запросы заблокированы до подключения VPN-туннеля.</string>
+    <string name="vpn_retry">Проверить снова</string>
+    <string name="vpn_open_settings">Настройки VPN</string>
+    <string name="status_vpn_blocked">Блокировано: нет активного VPN</string>
+
+    <string name="fixes_title">Гайд по решению проблем на сайтах</string>
+    <string name="fixes_intro">Найдите симптом, поймите какая защита его вызывает, и измените только нужный тумблер в отдельном профиле («+»), не ослабляя весь браузер.</string>
+    <string name="fixes_open_settings">Настройки</string>
+    <string name="fixes_search_hint">Поиск по симптомам, API, настройкам (RU / EN)…</string>
+    <string name="fixes_clear_search">Очистить поиск</string>
+    <string name="fixes_cat_all">Все</string>
+    <string name="fixes_cat_render_ui">Рендер и UI</string>
+    <string name="fixes_count_all">Показано тем: %1$d</string>
+    <string name="fixes_count_filtered">Найдено %1$d из %2$d тем</string>
+    <string name="fixes_empty_title">По вашему запросу ничего не найдено</string>
+    <string name="fixes_empty_body">Попробуйте более короткие слова (например: «капча», «звонок», «клавиатура», «dark», «vpn») или сбросьте фильтр категорий.</string>
+    <string name="fixes_reset_filters">Сбросить фильтры</string>
+    <string name="fixes_label_symptoms">Симптомы</string>
+    <string name="fixes_label_cause">Почему так происходит</string>
+    <string name="fixes_label_fix">Как исправить</string>
+
+    <string name="fix_canvas_title">Зацикливается капча, антибот или ломаются 2D/3D-редакторы</string>
+    <string name="fix_canvas_symptoms">Cloudflare Turnstile, hCaptcha или reCAPTCHA не проходят с первого раза; в Figma, онлайн-фоторедакторах или на WebGL-картах видны артефакты пикселей или не рендерится холст.</string>
+    <string name="fix_canvas_cause">Шум Canvas и WebGL слегка меняет значения пикселей (getImageData, toDataURL, readPixels). Антибот-проверки сверяют хэш холста, а графическим редакторам важна попиксельная точность.</string>
+    <string name="fix_canvas_fix">Настройки → Отпечаток → выключите «Шум Canvas и WebGL». Если капча при входе всё равно зацикливается, проверьте «Скрывать visibilityState» или включите «Micro-Jitter».</string>
+
+    <string name="fix_webrtc_title">Не работают видеозвонки, голос, показ экрана или P2P</string>
+    <string name="fix_webrtc_symptoms">В Google Meet, Zoom, Discord или Jitsi не подключается звук/видео; сервисы вроде Snapdrop не видят устройства в сети; поток с камеры или микрофона зависает.</string>
+    <string name="fix_webrtc_cause">Блокировка локальных ICE-кандидатов WebRTC не даёт RTCPeerConnection обнаружить сетевые интерфейсы и согласовать прямое медиасоединение.</string>
+    <string name="fix_webrtc_fix">Настройки → Сеть → выключите «Блокировать локальные ICE WebRTC» (удобно вынести в отдельный профиль «Звонки»).</string>
+
+    <string name="fix_blocklist_title">Не грузится оплата, вход через OAuth или встроенные виджеты</string>
+    <string name="fix_blocklist_symptoms">Кнопки «Войти через Google/GitHub», оплата Stripe/PayPal, виджеты комментариев или встроенные плееры остаются пустыми или бесконечно крутятся.</string>
+    <string name="fix_blocklist_cause">Встроенный блоклист режет домены рекламы, аналитики и телеметрии ещё до загрузки. Часть сайтов подгружает авторизацию или кассу через сторонние домены из этих списков.</string>
+    <string name="fix_blocklist_fix">Настройки → Сеть → временно выключите «Встроенный блоклист трекеров» в профиле сайта и верните обратно после входа или оплаты.</string>
+
+    <string name="fix_custom_rules_title">Пропали стили, шрифты или картинки из-за своих правил</string>
+    <string name="fix_custom_rules_symptoms">После добавления доменов в свой блоклист на сайте слетели шрифты, пропали иконки/картинки или перестали работать API-запросы.</string>
+    <string name="fix_custom_rules_cause">Слишком широкое правило-подстрока (например, «google» или «cdn») случайно цепляет нужные поддомены со шрифтами, статикой или скриптами.</string>
+    <string name="fix_custom_rules_fix">Настройки → Сеть → «Свой список доменов»: замените общие слова на точные хосты (например, metrics.example.com).</string>
+
+    <string name="fix_beacons_title">Не сохраняются черновики при закрытии или зависает отправка формы</string>
+    <string name="fix_beacons_symptoms">При уходе со страницы теряется набранный текст/прогресс, выход из аккаунта не срабатывает или форма зависает после нажатия «Отправить».</string>
+    <string name="fix_beacons_cause">Блокировка navigator.sendBeacon и telemetry ping отбрасывает фоновые запросы, которые сайт отправляет в момент закрытия или перехода.</string>
+    <string name="fix_beacons_fix">Настройки → Сеть → выключите «Блокировать sendBeacon и ping».</string>
+
+    <string name="fix_audio_title">Хрипит веб-синтезатор, аудиоредактор или тест микрофона</string>
+    <string name="fix_audio_symptoms">Браузерные DAW, эквалайзеры и анализаторы спектра (AnalyserNode), генераторы звука или проверка микрофона показывают искажения или треск.</string>
+    <string name="fix_audio_cause">Шум WebAudio подмешивает микроискажения в буфер AudioContext для защиты от аудио-фингерпринтинга, что влияет на точные DSP-инструменты.</string>
+    <string name="fix_audio_fix">Настройки → Отпечаток → выключите «Шум WebAudio».</string>
+
+    <string name="fix_visibility_title">Видео не ставится на паузу в фоне или молчат уведомления чата</string>
+    <string name="fix_visibility_symptoms">Плееры продолжают играть при сворачивании, веб-чаты не присылают уведомления (считают, что вы смотрите на вкладку), а формы не валидируются при уходе фокуса.</string>
+    <string name="fix_visibility_cause">Скрытие visibilityState и hasFocus заставляет страницу думать, что вкладка всегда активна и в фокусе, подавляя реальные события blur/visibilitychange.</string>
+    <string name="fix_visibility_fix">Настройки → Отпечаток → выключите «Скрывать visibilityState и фокус».</string>
+
+    <string name="fix_viewport_title">Клавиатура перекрывает ввод или ломается вёрстка и масштаб</string>
+    <string name="fix_viewport_symptoms">Экранная клавиатура закрывает поле ввода, модальные окна обрезаны, при повороте экрана интерфейс не перестраивается, а нажатия на картах сбиты.</string>
+    <string name="fix_viewport_cause">Фиксация Viewport глушит события resize и замораживает размеры окна, чтобы сайты не вычисляли высоту клавиатуры и геометрию экрана.</string>
+    <string name="fix_viewport_fix">Настройки → Отпечаток → выключите «Фиксировать Viewport и resize».</string>
+
+    <string name="fix_sensors_title">Не работают 360°-панорамы, компас на карте или наклон в играх</string>
+    <string name="fix_sensors_symptoms">Панорамы не поворачиваются при движении телефона, стрелка компаса замерла, или мобильный антифрод считает устройство эмулятором без микродвижений.</string>
+    <string name="fix_sensors_cause">Заглушка сенсоров отдаёт нейтральные синтетические значения в DeviceMotion и DeviceOrientation вместо реальных данных гироскопа и акселерометра.</string>
+    <string name="fix_sensors_fix">Настройки → Отпечаток → выключите «Нейтрализовать датчики движения».</string>
+
+    <string name="fix_perf_title">Дёргаются 60fps-анимации, лагают игры или врёт спидтест</string>
+    <string name="fix_perf_symptoms">WebGL-игры и плавные анимации подёргиваются, звук отстаёт от видео, а тесты скорости показывают странный пинг и задержку.</string>
+    <string name="fix_perf_cause">Огрубление performance.now() округляет точные таймеры до 20 микросекунд, что сбивает циклы расчёта кадров и замеры задержки.</string>
+    <string name="fix_perf_fix">Настройки → Отпечаток → выключите «Огрублять таймеры performance.now()».</string>
+
+    <string name="fix_jitter_title">При чтении дёргается страница или закрываются выпадающие списки</string>
+    <string name="fix_jitter_symptoms">Длинная статья периодически смещается на пиксель, сбрасывается выделение текста или самопроизвольно закрывается меню &lt;select&gt; / автодополнение.</string>
+    <string name="fix_jitter_cause">Micro-Jitter с заданным интервалом имитирует редкие микро-сдвиги при простое, чтобы активность не выглядела как бот.</string>
+    <string name="fix_jitter_fix">Настройки → Поведение → выключите «Micro-Jitter при простое» или увеличьте интервал в секундах (Min/Max).</string>
+
+    <string name="fix_schemes_title">Не открываются ссылки «В приложении», СБП, банки, tel: и mailto:</string>
+    <string name="fix_schemes_symptoms">Нажатие на ссылку Telegram, кнопку оплаты СБП, номер телефона (tel:) или почту (mailto:) ничего не делает и не открывает приложение.</string>
+    <string name="fix_schemes_cause">Блокировка внешних схем (intent://, tg://, tel:, mailto:) запрещает сайтам запускать сторонние приложения Android без явного разрешения.</string>
+    <string name="fix_schemes_fix">Настройки → Поведение → временно выключите «Блокировать внешние схемы», выполните переход и включите обратно.</string>
+
+    <string name="fix_dialogs_title">Кнопки «Удалить», «Выйти» или «Подтвердить» ничего не делают</string>
+    <string name="fix_dialogs_symptoms">На старых сайтах, форумах, в phpMyAdmin или админке роутера кнопка действия нажимается, но окно подтверждения не появляется и ничего не происходит.</string>
+    <string name="fix_dialogs_cause">Подавление JS-диалогов автоматически отменяет alert(), confirm() и prompt(), поэтому скрипт, ждущий confirm() === true, прерывает действие.</string>
+    <string name="fix_dialogs_fix">Настройки → Поведение → выключите «Подавлять JS-диалоги (alert/confirm)».</string>
+
+    <string name="fix_vpn_title">Все сайты заблокированы экраном VPN или ошибкой 403 (включая роутер)</string>
+    <string name="fix_vpn_symptoms">Постоянно висит экран «VPN не подключён», не работает прокси без VPN-интерфейса (например, Orbot SOCKS) или не открывается локальный роутер 192.168.x.x.</string>
+    <string name="fix_vpn_cause">VPN Kill-Switch требует активный системный интерфейс Android с TRANSPORT_VPN. Локальные прокси и адреса домашней сети без VPN-туннеля блокируются.</string>
+    <string name="fix_vpn_fix">Подключите VPN и нажмите «Проверить снова» либо временно выключите Настройки → VPN → «Блокировать запросы без VPN». Опция «Открывать стартовую сразу» пропускает только стартовую проверку, не отключая блокировку сети.</string>
+
+    <string name="fix_render_title">Инверсия цветов, наезд текста, не качаются файлы или не работает поиск</string>
+    <string name="fix_render_symptoms">Картинки инвертированы, чёрный текст на чёрном фоне, ломается масштаб, не сохраняется PDF/архив или адресная строка не ищет по запросу.</string>
+    <string name="fix_render_cause">Принудительная тёмная тема меняет цвета CSS; крупный масштаб сдвигает блоки; скачивание отключено по умолчанию для безопасности; поиск может быть выключен или шаблон своего URL задан без %s.</string>
+    <string name="fix_render_fix" formatted="false">Настройки → Основное: выключите «Принудительную тёмную тему», верните масштаб текста на 100%, включите «Разрешить скачивание файлов» при необходимости и проверьте поисковик (в своём URL обязательно %s).</string>
+
+    <string name="fix_session_title">Вылетает аккаунт после закрытия или не видно скриншотов в Галерее</string>
+    <string name="fix_session_symptoms">После перезапуска браузера слетают все логины и корзины; сделанные скриншоты не появляются в стандартной Галерее телефона.</string>
+    <string name="fix_session_cause">Авто-Wipe при выходе очищает cookies, хранилище, кэш и перегенерирует seed фингерпринта. Скрытое хранилище изолирует снимки внутри песочницы приложения.</string>
+    <string name="fix_session_fix">Настройки → Сессия: выключите «Авто-Wipe при выходе» для сохранения логинов. Настройки → Скриншоты: выберите «Всегда в Галерею» или экспортируйте снимок из просмотра скрытых скриншотов.</string>
+    <string name="http_warn_title">Незащищённое HTTP-соединение</string>
+    <string name="http_warn_body">Вы открываете %1$s по открытому HTTP без шифрования. Трафик может быть перехвачен или изменён в сети.</string>
+    <string name="http_warn_proceed">Всё равно открыть</string>
+
+    <string name="ssl_warn_title">Недействительный SSL-сертификат</string>
+    <string name="ssl_warn_body">Сертификат безопасности для %1$s не является доверенным или просрочен. Продолжение подвергает соединение риску перехвата.</string>
+    <string name="ssl_warn_proceed">Всё равно продолжить</string>
+    <string name="site_info_https_secure">Зашифрованное HTTPS-соединение</string>
+    <string name="site_info_http_unencrypted">Незашифрованное HTTP-соединение</string>
+    <string name="site_info_ssl_bypassed">Предупреждение SSL пропущено</string>
+    <string name="site_info_local_page">Локальная / пустая страница</string>
+    <string name="site_info_vpn_on">VPN Kill-Switch: активен (туннель подключён)</string>
+    <string name="site_info_vpn_down">VPN Kill-Switch: ожидание VPN-туннеля</string>
+    <string name="site_info_vpn_off">VPN Kill-Switch: выключен</string>
+    <string name="site_info_active_profile">Быстрое переключение профиля</string>
+    <string name="site_info_blocked_header">Заблокировано трекеров (%1$d)</string>
+    <string name="site_info_blocked_none">На этой странице пока не заблокировано ни одного запроса.</string>
+    <string name="site_info_rule_keep">+ В блоклист</string>
+    <string name="site_info_rule_remove">Убрать правило</string>
+    <string name="site_info_rule_added">%1$s добавлен в свой блоклист</string>
+    <string name="site_info_rule_removed">%1$s удалён из своего блоклиста</string>
+    <string name="site_info_cert_section">Сертификат</string>
+    <string name="site_info_cert_issued_to">Кому выдан</string>
+    <string name="site_info_cert_issued_by">Кем выдан</string>
+    <string name="site_info_cert_validity">Действует</string>
+    <string name="site_info_cert_days_left">осталось %1$d дн.</string>
+    <string name="site_info_cert_expired">Истёк</string>
+    <string name="site_info_cert_details_toggle">Технические детали</string>
+    <string name="site_info_cert_algorithm">Подпись и ключ</string>
+    <string name="site_info_cert_serial">Серийный номер</string>
+    <string name="site_info_cert_sans">Домены (SAN)</string>
+    <string name="site_info_cert_sha256">SHA-256</string>
+    <string name="site_info_cert_copied">SHA-256 скопирован</string>
+    <string name="site_info_cert_unavailable">Данные сертификата недоступны</string>
+    <string name="site_info_cert_none">Нет TLS-сертификата</string>
+
+    <string name="pin_title">Введите PIN-код</string>
+    <string name="pin_subtitle">Stealth Snake заблокирован</string>
+    <string name="pin_hint">PIN от 4 до 8 цифр</string>
+    <string name="pin_unlock">Разблокировать</string>
+    <string name="pin_wrong">Неверный PIN (осталось попыток до Wipe: %1$d)</string>
+    <string name="pin_wrong_simple">Неверный PIN-код</string>
+    <string name="pin_locked_out">Слишком много попыток. Повторите через %1$d с.</string>
+    <string name="pin_wiped">Слишком много неверных попыток — сессия очищена</string>
+    <string name="pin_setup_title">Установить PIN-код</string>
+    <string name="pin_setup_body">Задайте PIN от 4 до 8 цифр для блокировки браузера при запуске и возврате из фона.</string>
+    <string name="pin_setup_invalid">PIN должен содержать от 4 до 8 цифр</string>
+    <string name="pin_saved">PIN-блокировка включена</string>
+    <string name="pin_removed">PIN-блокировка удалена</string>
+    <string name="pref_pin_set">Установить / изменить PIN-код</string>
+    <string name="pref_pin_remove">Удалить PIN-код</string>
+    <string name="pref_pin_auto_wipe">Авто-Wipe после 5 ошибок PIN</string>
+    <string name="desc_pin_auto_wipe">Автоматически стирает cookies, хранилище, снимки, офлайн-страницы и личные настройки при 5 неудачных попытках ввода PIN.</string>
+    <string name="pin_confirm_hint">Повторите PIN (4–8 цифр)</string>
+    <string name="pin_setup_mismatch">Введённые PIN-коды не совпадают</string>
+    <string name="pin_verify_current_title">Подтвердите текущий PIN</string>
+    <string name="pin_verify_current_body">Введите текущий PIN-код, чтобы продолжить.</string>
+    <string name="pin_verify_remove_title">Подтвердите удаление PIN</string>
+    <string name="pin_verify_disable_autowipe_title">Подтвердите отключение авто-Wipe</string>
+    <string name="pref_auto_clear_offline">Очищать офлайн и загрузки при Wipe</string>
+    <string name="desc_auto_clear_offline">Очищает сохранённые офлайн-страницы и список загрузок при каждой очистке сессии.</string>
+    <string name="reset_confirm_title">Сбросить настройки по умолчанию?</string>
+    <string name="reset_confirm_body">Флаги приватности, свой блоклист, профили и стартовый URL будут сброшены. Защита PIN-кодом сохранится.</string>
+    <string name="action_reset">Сбросить</string>
+    <string name="onboarding_pin_cta">Установить PIN</string>
+    <string name="onboarding_title_pin">Защитите вход PIN-кодом</string>
+    <string name="onboarding_body_pin">При желании задайте PIN от 4 до 8 цифр для блокировки Stealth Snake при сворачивании с авто-очисткой сессии после 5 неверных попыток.</string>
+
+    <string name="btn_reader_mode">Режим чтения</string>
+    <string name="reader_unavailable">Не удалось извлечь текст статьи на этой странице.</string>
+    <string name="reader_close">Закрыть</string>
+
+    <string name="btn_save_offline">Сохранить страницу офлайн</string>
+    <string name="offline_saved">Сохранено офлайн: %1$s</string>
+    <string name="offline_save_failed">Не удалось сохранить страницу офлайн</string>
+
+    <string name="btn_downloads">Загрузки</string>
+    <string name="downloads_title">Загрузки и офлайн</string>
+    <string name="downloads_clear_history">Очистить список</string>
+    <string name="downloads_disabled_notice">Скачивание файлов сейчас отключено в настройках. Включите его, чтобы загружать файлы с сайтов.</string>
+    <string name="downloads_enable_in_settings">Включить в настройках</string>
+    <string name="downloads_section_files">Последние загрузки</string>
+    <string name="downloads_section_pages">Сохранённые офлайн-страницы</string>
+    <string name="downloads_empty_files">Список загруженных файлов пока пуст.</string>
+    <string name="downloads_empty_pages">Сохранённых страниц пока нет. Используйте меню → Сохранить страницу офлайн.</string>
+    <string name="downloads_status_saved">Сохранено</string>
+    <string name="downloads_status_failed">Ошибка</string>
+    <string name="downloads_open_offline">Открыть офлайн</string>
+
+    <string name="external_scheme_title">Открыть внешнюю ссылку?</string>
+    <string name="external_scheme_message">Страница запрашивает открытие «%1$s» во внешнем приложении. Внешние приложения работают вне песочницы Stealth Snake.</string>
+    <string name="external_scheme_open">Открыть</string>
+    <string name="external_scheme_no_app">Нет приложения для ссылок %1$s</string>
+    <string name="renderer_crashed_notice">Рендерер страницы перезапущен после сбоя</string>
+    <string name="file_upload_blocked_notice">Загрузка файлов с устройства отключена в изолированной песочнице</string>
+    <string name="site_info_blocked_item">%1$s (%2$d)</string>
+    <string name="captures_item_meta">%1$s · %2$s</string>
+    <string name="downloads_item_meta">%1$s · %2$s · %3$s</string>
+    <string name="downloads_page_meta">%1$s · %2$d КБ · %3$s</string>
+    <string name="jitter_seconds_format">%1$d с</string>
+
+    <!-- Multi-session switcher -->
+    <string name="sessions_sheet_title">Изолированные сессии (%1$d)</string>
+    <string name="sessions_new">Новая сессия</string>
+    <string name="sessions_wipe_all">Очистить все</string>
+    <string name="sessions_blank_title">Новая изолированная сессия</string>
+    <string name="sessions_active_badge">Активна</string>
+    <string name="sessions_close_desc">Закрыть сессию</string>
+    <string name="sessions_badge_desc">Открытых сессий: %1$d</string>
+    <string name="sessions_blocked_count">Заблокировано: %1$d</string>
+    <string name="status_switched_session">Сессия %1$d из %2$d</string>
+    <string name="status_closed_session">Сессия закрыта</string>
+
+    <!-- PIN UI redesign -->
+    <string name="pin_auto_wipe_badge">Авто-очистка после 5 неверных попыток</string>
+    <string name="pin_clear_key">СБР</string>
+    <string name="pin_backspace_desc">Удалить цифру</string>
+    <string name="pin_new_label">Новый PIN (4–8 цифр)</string>
+    <string name="pin_confirm_label">Подтвердите PIN</string>
+    <string name="pin_current_label">Текущий PIN</string>
+    <string name="pin_status_enabled">Защита PIN-кодом включена</string>
+    <string name="pin_status_disabled">PIN-код не установлен</string>
+    <string name="pref_pin_change">Изменить PIN-код</string>
+
+    <!-- Reorganized Settings categories -->
+    <string name="nav_security">Защита</string>
+    <string name="cat_security">Приватность и защита</string>
+    <string name="cat_appearance">Внешний вид и язык</string>
+    <string name="subcat_vpn">VPN Kill-Switch</string>
+    <string name="subcat_blocking">Трафик и трекеры</string>
+    <string name="subcat_fingerprint">Защита от фингерпринтинга</string>
+    <string name="subcat_behavior">Поведение и диалоги</string>
+    <string name="subcat_pin_lock">Защита PIN-кодом</string>
+    <string name="subcat_session_wipe">Сессия и очистка</string>
+    <string name="subcat_captures">Экран и снимки</string>
+    <string name="subcat_display">Экран и чтение</string>
+    <string name="theme_system_dynamic">Системная</string>
+
+    <string name="download_confirm_title">Скачать файл?</string>
+    <string name="download_confirm_message">Файл: %1$s\nИсточник: %2$s</string>
+    <string name="download_confirm_http_warning">\n\nВнимание: незашифрованное HTTP-соединение. Файл может быть перехвачен или изменён в пути.</string>
+    <string name="download_confirm_action">Скачать</string>
+    <string name="status_capture_gallery_requires_q">Экспорт в галерею требует Android 10 или новее</string>
+    <string name="site_info_snake_script_unsupported">Защита от фингерпринтинга неактивна (WebView не поддерживает DOCUMENT_START_SCRIPT)</string>
+</resources>

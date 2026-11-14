@@ -1,0 +1,501 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Stealth Snake</string>
+    <string name="url_hint">Search or type URL</string>
+
+    <!-- Toolbar & Chrome-like controls -->
+    <string name="btn_home">Home</string>
+    <string name="btn_back">Back</string>
+    <string name="btn_forward">Forward</string>
+    <string name="btn_reload">Reload</string>
+    <string name="btn_copy_url">Copy URL</string>
+    <string name="btn_find_in_page">Find in page</string>
+    <string name="btn_capture">Screenshot</string>
+    <string name="btn_wipe">Wipe session</string>
+    <string name="btn_new_tab">New isolated session</string>
+    <string name="btn_tabs_placeholder">1</string>
+    <string name="session_single_tab_hint">Single isolated session — tap + to start fresh</string>
+    <string name="btn_menu">More options</string>
+    <string name="btn_clear_url">Clear address</string>
+    <string name="btn_site_info">Connection info</string>
+    <string name="btn_settings">Settings</string>
+    <string name="btn_captures_viewer">Hidden screenshots</string>
+    <string name="url_copied">URL copied</string>
+    <string name="find_hint">Find in page…</string>
+    <string name="find_count_format">%1$d/%2$d</string>
+
+    <!-- Empty start page -->
+    <string name="start_card_title">Blank page</string>
+    <string name="start_card_body">Enter an address above or set a default home page.</string>
+    <string name="start_card_configure">Set home page</string>
+    <string name="start_card_dismiss">Hide</string>
+
+    <!-- Downloads -->
+    <string name="download_started">Downloading %1$s…</string>
+    <string name="download_saved">Saved to Downloads: %1$s</string>
+    <string name="download_failed">Download failed</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_title_1">Welcome to Stealth Snake</string>
+    <string name="onboarding_body_1">Isolated browser built around minimal permissions (Internet only), DocumentStart anti-fingerprinting, and zero background telemetry.</string>
+    <string name="onboarding_title_2">Live Security Snapshot</string>
+    <string name="onboarding_body_2">• Active preset: %1$s\n• Accounts (cookies): %2$s\n• Screenshots: %3$s\n• Start page: %4$s</string>
+    <string name="onboarding_accounts_ephemeral">Cleared on exit (Auto-Wipe ON)</string>
+    <string name="onboarding_accounts_saved">Saved between launches (Auto-Wipe OFF)</string>
+    <string name="onboarding_title_3">Quick Controls</string>
+    <string name="onboarding_body_3">• Tap + to wipe the current session and rotate your fingerprint seed.\n• Pull down at the top of a page to reload.\n• Open ⋮ for screenshots, Find in page, and Settings.</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_done">Get started</string>
+    <string name="onboarding_skip">Skip</string>
+
+    <!-- Status & Capture feedback -->
+    <string name="status_ready">Protection active</string>
+    <string name="status_captured">Saved to sandbox (%1$s)</string>
+    <string name="status_captured_gallery">Saved to Gallery (%1$s)</string>
+    <string name="status_capture_failed">Capture failed</string>
+    <string name="status_wiped">Session wiped</string>
+    <string name="status_new_session">New isolated session started</string>
+    <plurals name="status_blocked">
+        <item quantity="one">Protection active · %1$d tracker blocked</item>
+        <item quantity="other">Protection active · %1$d trackers blocked</item>
+    </plurals>
+
+    <!-- Capture choice & Info dialog -->
+    <string name="capture_choice_title">Where to save screenshots?</string>
+    <string name="capture_choice_message">Choose default storage for screenshots. You can change this anytime in Settings.</string>
+    <string name="capture_choice_private">Hidden storage</string>
+    <string name="capture_choice_gallery">Gallery</string>
+    <string name="capture_info_title">Why use Hidden Storage?</string>
+    <string name="capture_info_body">• App isolation: stored in private app sandbox (filesDir/captures). Other apps with photo permissions cannot read them.\n\n• No MediaStore metadata: Gallery indexes creation time and owner package name (com.nromanovich.stealthsnake).\n\n• No cloud auto-upload: prevents Google Photos or OEM cloud backup from syncing screenshots.\n\n• Wipe-ready: can be cleared automatically when wiping your session.</string>
+    <string name="action_ok">OK</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_open">Open</string>
+    <string name="action_export_gallery">To Gallery</string>
+    <string name="action_delete">Delete</string>
+
+    <!-- Wipe confirmation -->
+    <string name="wipe_confirm_title">Wipe current session?</string>
+    <string name="wipe_confirm_message">Cookies, cache, storage, and history will be cleared and a new fingerprint seed will be generated.</string>
+
+    <!-- Captures viewer -->
+    <string name="captures_title">Hidden Screenshots</string>
+    <string name="captures_empty">No hidden screenshots saved yet.</string>
+    <string name="captures_exported">Exported to Gallery</string>
+    <string name="captures_export_failed">Export failed</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_search_hint">Search settings</string>
+    <string name="settings_search_empty">No matching settings</string>
+    <string name="hub_group_everyday">Everyday setup</string>
+    <string name="hub_group_privacy">Privacy, access &amp; files</string>
+    <string name="hub_group_network_snake">Network &amp; anti-tracking</string>
+    <string name="hub_group_about">System</string>
+    <string name="cat_hub_presets">Protection profiles</string>
+    <string name="cat_hub_search_home">Search &amp; start page</string>
+    <string name="cat_hub_appearance">Appearance &amp; display</string>
+    <string name="cat_hub_pin">PIN lock</string>
+    <string name="cat_hub_wipe">Session &amp; data wipe</string>
+    <string name="cat_hub_downloads">Downloads &amp; screenshots</string>
+    <string name="cat_hub_vpn">VPN &amp; network guard</string>
+    <string name="cat_hub_blocking">Tracker &amp; ad blocking</string>
+    <string name="cat_hub_antifp">Anti-fingerprinting &amp; stealth</string>
+    <string name="cat_hub_about">About &amp; reset</string>
+    <string name="state_on_short">On</string>
+    <string name="state_off_short">Off</string>
+    <string name="hub_sub_pin_on">Enabled</string>
+    <string name="hub_sub_pin_off">Disabled</string>
+    <string name="hub_sub_wipe">Auto-wipe on exit: %1$s</string>
+    <string name="hub_sub_downloads">Downloads: %1$s · Screenshots: %2$s</string>
+    <string name="hub_sub_vpn">Kill-Switch: %1$s · WebRTC block: %2$s</string>
+    <string name="hub_sub_blocking">Blocklist: %1$s · Custom rules: %2$d</string>
+    <string name="hub_sub_antifp">%1$d shields active · Micro-jitter: %2$s</string>
+    <string name="hub_sub_about">Version %1$s · GitHub &amp; reset</string>
+    <string name="settings_presets">Protection Preset</string>
+    <string name="preset_max_stealth">Max Stealth</string>
+    <string name="preset_compatibility">Compatibility</string>
+    <string name="preset_custom">Custom</string>
+
+    <string name="cat_capture">Capture &amp; Storage</string>
+    <string name="pref_capture_mode">Screenshot destination</string>
+    <string name="capture_mode_ask">Ask on first capture</string>
+    <string name="capture_mode_private">Always hidden storage</string>
+    <string name="capture_mode_gallery">Always Gallery</string>
+    <string name="pref_auto_clear_captures">Clear captures on Wipe</string>
+    <string name="pref_why_hidden_storage">Why hidden storage?</string>
+
+    <string name="cat_navigation">Navigation &amp; QoL</string>
+    <string name="pref_home_url">Home / start URL</string>
+    <string name="pref_search_engine">Search engine</string>
+    <string name="search_ddg">DuckDuckGo</string>
+    <string name="search_startpage">Startpage</string>
+    <string name="search_brave">Brave Search</string>
+    <string name="search_off">Disabled</string>
+    <string name="pref_force_dark">Force dark mode</string>
+    <string name="pref_text_zoom">Text scale</string>
+
+    <string name="cat_network">Network &amp; Blocking</string>
+    <string name="pref_builtin_blocklist">Tracker blocklist</string>
+    <string name="pref_custom_blocklist">Custom rules (||domain or path:/prefix)</string>
+    <string name="pref_block_webrtc">Block WebRTC local ICE</string>
+    <string name="pref_block_beacons">Block sendBeacon</string>
+
+    <string name="cat_antifp">Anti-Fingerprinting</string>
+    <string name="pref_noise_canvas">Canvas / WebGL noise</string>
+    <string name="pref_noise_audio">WebAudio noise</string>
+    <string name="pref_hide_visibility">Lock visibilityState</string>
+    <string name="pref_lock_viewport">Lock viewport</string>
+    <string name="pref_sensor_fallback">Sensor fallback</string>
+    <string name="pref_fuzz_perf">Quantize performance.now</string>
+
+    <string name="cat_behavioral">Behavioral Protection</string>
+    <string name="pref_jitter_enabled">Micro-Jitter</string>
+    <string name="pref_jitter_min">Min idle delay (sec)</string>
+    <string name="pref_jitter_max">Max idle delay (sec)</string>
+    <string name="pref_block_schemes">Block external schemes (intent:, tel:)</string>
+    <string name="pref_suppress_dialogs">Suppress JS dialogs</string>
+
+    <string name="cat_session_ui">Session &amp; Interface</string>
+    <string name="pref_language">App language</string>
+    <string name="lang_system">System default</string>
+    <string name="lang_en">English</string>
+    <string name="lang_ru">Русский</string>
+    <string name="pref_confirm_wipe">Confirm Wipe</string>
+    <string name="pref_auto_wipe_exit">Auto-Wipe on exit</string>
+    <string name="pref_auto_wipe_hint">Disable to keep logins (cookies) between app launches.</string>
+    <string name="pref_block_screenshots">Block screenshots</string>
+    <string name="desc_block_screenshots">Enables FLAG_SECURE: hides Recents preview and blocks screen capture.</string>
+    <string name="cat_downloads">Downloads</string>
+    <string name="pref_downloads_enabled">Allow downloads</string>
+    <string name="pref_downloads_hint">Off by default to block silent downloads. Saves to Downloads/StealthSnake.</string>
+    <string name="pref_theme_palette">Color theme</string>
+    <string name="theme_obsidian">Obsidian Dark</string>
+    <string name="theme_amoled">AMOLED Black</string>
+    <string name="theme_midnight">Midnight Blue</string>
+    <string name="theme_emerald">Emerald Splash</string>
+    <string name="theme_slate_light">Slate Light</string>
+    <string name="pref_show_onboarding">Show intro guide again</string>
+    <string name="cat_about">About</string>
+    <string name="about_version_format">Stealth Snake v%1$s</string>
+    <string name="about_author">Author: github.com/n-romanovich</string>
+    <string name="about_description">Lightweight Android browser focused on isolation, minimal permissions, and blocking silent data collection.</string>
+    <string name="about_github_label">GitHub</string>
+    <string name="about_github_url">https://github.com/n-romanovich/stealth-snake-browser</string>
+    <string name="about_github_copied">GitHub link copied</string>
+    <string name="pref_keep_screen_on">Keep screen on</string>
+    <string name="pref_haptic">Haptic feedback</string>
+    <string name="pref_show_status_bar">Tracker status bar</string>
+    <string name="pref_reset_defaults">Reset settings</string>
+    <string name="settings_reset_done">Settings reset to defaults</string>
+
+    <!-- Settings section guide (left rail) -->
+    <string name="nav_presets">Presets</string>
+    <string name="nav_navigation">Everyday</string>
+    <string name="nav_downloads">Downloads</string>
+    <string name="nav_capture">Captures</string>
+    <string name="nav_session">Session</string>
+    <string name="nav_appearance">Theme</string>
+    <string name="nav_network">Network</string>
+    <string name="nav_antifp">Fingerprint</string>
+    <string name="nav_behavioral">Behavior</string>
+    <string name="nav_about">About</string>
+
+    <!-- Plain-language descriptions for every setting -->
+    <string name="desc_presets">Max Stealth enables all defenses; Compatibility eases strict checks.</string>
+    <string name="desc_home_url">Opens on launch and Home tap (use about:blank for blank).</string>
+    <string name="desc_force_dark">Darkens bright websites automatically. Turn off if a site looks inverted or hard to read.</string>
+    <string name="desc_auto_clear_captures">Removes hidden in-app screenshots whenever you wipe the session.</string>
+    <string name="desc_confirm_wipe">Asks before clearing cookies, history, and cache so you do not wipe by mistake.</string>
+    <string name="desc_keep_screen_on">Prevents the screen from sleeping while reading long pages.</string>
+    <string name="desc_haptic">Short vibration when taking a screenshot or wiping the session.</string>
+    <string name="desc_show_status_bar">Shows a thin bar under the address field with blocked tracker count.</string>
+    <string name="desc_builtin_blocklist">Blocks known ad, analytics, and telemetry domains before they load.</string>
+    <string name="desc_block_webrtc">Prevents WebRTC from leaking your local Wi-Fi or VPN IP.</string>
+    <string name="desc_block_beacons">Blocks background pings sent when closing or leaving a page.</string>
+    <string name="desc_noise_canvas">Adds per-session noise to Canvas/WebGL to vary your fingerprint.</string>
+    <string name="desc_noise_audio">Adds noise to WebAudio output to block audio fingerprinting.</string>
+    <string name="desc_hide_visibility">Reports the tab as always active, hiding app switches.</string>
+    <string name="desc_lock_viewport">Blocks resize events to hide window geometry and keyboard height.</string>
+    <string name="desc_sensor_fallback">Returns neutral values instead of live motion/orientation sensors.</string>
+    <string name="desc_fuzz_perf">Rounds timers to 20 µs to hinder timing attacks.</string>
+    <string name="desc_jitter_enabled">Adds subtle idle micro-scrolls to mimic natural reading.</string>
+    <string name="desc_block_schemes">Blocks links like intent:// or tel: from launching other apps behind your back.</string>
+    <string name="desc_suppress_dialogs">Silences annoying alert/confirm/prompt popups from web pages.</string>
+
+    <!-- Compatibility warning & Site Fixes placeholder -->
+    <string name="compat_warn_title">Staying on Max Stealth is recommended</string>
+    <string name="compat_warn_body">Max Stealth works on most websites. If a specific site has a compatibility issue, it is better not to relax all defenses at once: check the fix guide to see which option helps, and adjust it in a separate profile via "+".</string>
+    <string name="compat_warn_enable">Enable anyway</string>
+    <string name="compat_warn_guide">Guide</string>
+    <string name="pref_site_fixes_guide">Site broken? Fix guide</string>
+
+    <!-- Custom profiles -->
+    <string name="profile_add_desc">Add custom profile</string>
+    <string name="profile_create_title">New settings profile</string>
+    <string name="profile_create_hint">Profile name (e.g. Banking, Video)</string>
+    <string name="profile_create_btn">Create</string>
+    <string name="profile_created">Profile "%1$s" created</string>
+    <string name="profile_delete_title">Delete profile "%1$s"?</string>
+    <string name="profile_delete_btn">Delete</string>
+    <string name="profiles_section_title">Custom profiles</string>
+    <string name="profiles_hint">Saves your switch setup. Long-press a profile to delete.</string>
+
+    <!-- Custom search engine -->
+    <string name="search_custom">Custom URL</string>
+    <string name="pref_custom_search_template">Custom search URL template</string>
+    <string name="desc_custom_search_template" formatted="false">Use %s for the query (e.g. https://searx.be/search?q=%s).</string>
+
+    <!-- VPN Kill-Switch -->
+    <string name="nav_vpn">VPN</string>
+    <string name="cat_vpn">VPN Kill-Switch</string>
+    <string name="pref_vpn_kill_switch">Block requests without VPN</string>
+    <string name="desc_vpn_kill_switch">Blocks HTTP/HTTPS without an active VPN. For full socket protection, enable Always-on VPN in Android.</string>
+    <string name="pref_vpn_bypass_start">Open start page immediately</string>
+    <string name="desc_vpn_bypass_start">Opens start page immediately (network requests stay blocked until VPN connects).</string>
+
+    <string name="vpn_blocked_title">VPN is disconnected</string>
+    <string name="vpn_blocked_body">VPN Kill-Switch is active. All page loads and network requests are blocked until a VPN tunnel connects.</string>
+    <string name="vpn_retry">Check again</string>
+    <string name="vpn_open_settings">VPN settings</string>
+    <string name="status_vpn_blocked">Blocked: no active VPN</string>
+
+    <string name="fixes_title">Site Troubleshooting Guide</string>
+    <string name="fixes_intro">Find what broke on a website, understand why it happens under strict privacy protections, and change only the exact setting in a custom profile ("+") instead of weakening everything.</string>
+    <string name="fixes_open_settings">Settings</string>
+    <string name="fixes_search_hint">Search symptoms, APIs, settings (EN / RU)…</string>
+    <string name="fixes_clear_search">Clear search</string>
+    <string name="fixes_cat_all">All</string>
+    <string name="fixes_cat_render_ui">Render &amp; UI</string>
+    <string name="fixes_count_all">Showing %1$d topics</string>
+    <string name="fixes_count_filtered">Found %1$d of %2$d topics</string>
+    <string name="fixes_empty_title">Nothing matched your query</string>
+    <string name="fixes_empty_body">Try simpler keywords (e.g. "captcha", "webrtc", "keyboard", "dark", "vpn") or reset the category filter.</string>
+    <string name="fixes_reset_filters">Reset filters</string>
+    <string name="fixes_label_symptoms">Symptoms</string>
+    <string name="fixes_label_cause">Why it happens</string>
+    <string name="fixes_label_fix">How to fix</string>
+
+    <string name="fix_canvas_title">Captcha loops, bot checks, or broken 2D/3D editors</string>
+    <string name="fix_canvas_symptoms">Cloudflare Turnstile, hCaptcha, or reCAPTCHA keeps failing/looping; Figma, online photo editors, or WebGL maps show pixel artifacts or refuse to render.</string>
+    <string name="fix_canvas_cause">Canvas/WebGL noise subtly alters pixel readouts (getImageData, toDataURL, readPixels). Anti-bot scripts compare expected hashes, and graphic editors rely on exact pixel math.</string>
+    <string name="fix_canvas_fix">Settings → Fingerprint → turn off "Noise Canvas &amp; WebGL". If a login captcha still loops, also check "Lock visibilityState" or enable "Micro-Jitter".</string>
+
+    <string name="fix_webrtc_title">Video/voice calls, screen share, or P2P transfers fail</string>
+    <string name="fix_webrtc_symptoms">Google Meet, Zoom Web, Discord, or Jitsi cannot connect audio/video; Snapdrop/ShareDrop peers are invisible; microphone/camera stream stalls.</string>
+    <string name="fix_webrtc_cause">Blocking WebRTC local ICE candidates prevents RTCPeerConnection from discovering local/VPN network interfaces and negotiating direct media streams.</string>
+    <string name="fix_webrtc_fix">Settings → Network → turn off "Block WebRTC local ICE candidates" (best done in a dedicated "Calls" custom profile).</string>
+
+    <string name="fix_blocklist_title">Payments, OAuth logins, or embedded widgets do not load</string>
+    <string name="fix_blocklist_symptoms">"Sign in with Google/GitHub", Stripe/PayPal checkout, comment widgets, or embedded video players stay blank or hang endlessly.</string>
+    <string name="fix_blocklist_cause">The built-in blocklist blocks tracker, ad, and telemetry domains at the request level. Some sites bundle auth, checkout, or player scripts through those third-party domains.</string>
+    <string name="fix_blocklist_fix">Settings → Network → temporarily turn off "Built-in tracker blocklist" in a site profile, then turn it back on after checkout/login.</string>
+
+    <string name="fix_custom_rules_title">Missing images, fonts, or broken layout from custom rules</string>
+    <string name="fix_custom_rules_symptoms">A specific website loses all styling, icons, fonts, or fails API calls after you added domains to your custom blocklist.</string>
+    <string name="fix_custom_rules_cause">Broad substring rules (e.g. "google" or "cdn") can accidentally match essential subdomains like gstatic, fonts, or static asset hosts.</string>
+    <string name="fix_custom_rules_fix">Settings → Network → "Custom blocklist domains": replace broad words with exact hostnames (e.g. metrics.example.com).</string>
+
+    <string name="fix_beacons_title">Drafts not saved on exit or form submission hangs</string>
+    <string name="fix_beacons_symptoms">Closing a tab loses unsaved text/progress, logout fails to register, or certain anti-bot checks stall after clicking Submit.</string>
+    <string name="fix_beacons_cause">Blocking navigator.sendBeacon and ping requests drops background fire-and-forget requests triggered when navigating away.</string>
+    <string name="fix_beacons_fix">Settings → Network → turn off "Block sendBeacon &amp; telemetry pings".</string>
+
+    <string name="fix_audio_title">Web synthesizers, audio editors, or sound tests glitch</string>
+    <string name="fix_audio_symptoms">Browser DAWs, frequency visualizers (AnalyserNode), tone generators, or mic-check pages produce crackles or wrong spectrum readings.</string>
+    <string name="fix_audio_cause">WebAudio noise perturbs AudioContext buffer/frequency outputs to defeat audio fingerprinting, which affects DSP tools that read exact samples.</string>
+    <string name="fix_audio_fix">Settings → Fingerprint → turn off "WebAudio noise".</string>
+
+    <string name="fix_visibility_title">Video keeps playing in background or chat notifications stop</string>
+    <string name="fix_visibility_symptoms">Media players do not auto-pause when switching apps, web chats never mark messages unread/send alerts, or proctoring/banking forms miss focus/blur validation.</string>
+    <string name="fix_visibility_cause">Hiding visibilityState/hasFocus forces the page to believe the tab is always active and focused, suppressing real blur and visibilitychange events.</string>
+    <string name="fix_visibility_fix">Settings → Fingerprint → turn off "Hide visibilityState &amp; focus".</string>
+
+    <string name="fix_viewport_title">Keyboard covers input fields or layout scales wrong</string>
+    <string name="fix_viewport_symptoms">On-screen keyboard hides the text box you are typing in, modals clip off-screen, rotation does not reflow the page, or touch coordinates miss on maps/canvases.</string>
+    <string name="fix_viewport_cause">Viewport lock suppresses window resize events and freezes reported innerWidth/screen metrics so websites cannot probe keyboard height or screen geometry.</string>
+    <string name="fix_viewport_fix">Settings → Fingerprint → turn off "Lock viewport &amp; block resize events".</string>
+
+    <string name="fix_sensors_title">360° panoramas, compass, or tilt controls do not respond</string>
+    <string name="fix_sensors_symptoms">Street View/VR panoramas stay frozen when moving the phone, map compass does not rotate, or mobile anti-fraud checks complain about zero motion.</string>
+    <string name="fix_sensors_cause">Sensor fallback feeds calm synthetic values to DeviceMotion and DeviceOrientation APIs instead of live gyroscope/accelerometer data.</string>
+    <string name="fix_sensors_fix">Settings → Fingerprint → turn off "Neutralize motion &amp; orientation sensors".</string>
+
+    <string name="fix_perf_title">Stuttering 60fps animations, game lag, or skewed speedtests</string>
+    <string name="fix_perf_symptoms">WebGL games or smooth animations jitter, audio/video drifts out of sync, or latency/speed tests report erratic ping numbers.</string>
+    <string name="fix_perf_cause">Fuzzing performance.now() rounds high-resolution timers to 20 microseconds, which can confuse tight frame-delta loops or sub-millisecond benchmarks.</string>
+    <string name="fix_perf_fix">Settings → Fingerprint → turn off "Fuzz performance.now() timers".</string>
+
+    <string name="fix_jitter_title">Page twitches slightly or dropdowns close while reading</string>
+    <string name="fix_jitter_symptoms">Long articles scroll by a pixel on idle, text selection resets, or open &lt;select&gt; / autocomplete menus unexpectedly dismiss.</string>
+    <string name="fix_jitter_cause">Micro-Jitter injects periodic tiny touch/scroll activity at your configured min/max interval so idle sessions do not look robotic.</string>
+    <string name="fix_jitter_fix">Settings → Behavior → turn off "Micro-Jitter idle activity" or increase the Min/Max interval seconds.</string>
+
+    <string name="fix_schemes_title">"Open in app", bank payment, or tel:/mailto: links do nothing</string>
+    <string name="fix_schemes_symptoms">Tapping Telegram links, banking/SBP payment buttons, phone numbers (tel:), or email links (mailto:) stays inside the browser with no action.</string>
+    <string name="fix_schemes_cause">Blocking external URI schemes (intent://, tg://, tel:, mailto:) prevents websites from silently launching external Android apps.</string>
+    <string name="fix_schemes_fix">Settings → Behavior → temporarily turn off "Block external app schemes" to complete the handoff, then re-enable it.</string>
+
+    <string name="fix_dialogs_title">Delete, logout, or confirm buttons on older sites do nothing</string>
+    <string name="fix_dialogs_symptoms">Clicking "Delete", "Log out", or actions in router admin panels / phpMyAdmin has no effect and never asks for confirmation.</string>
+    <string name="fix_dialogs_cause">Suppressing JS dialogs automatically blocks/cancels alert(), confirm(), and prompt(), so scripts waiting for confirm() === true abort the action.</string>
+    <string name="fix_dialogs_fix">Settings → Behavior → turn off "Suppress JS alert/confirm/prompt".</string>
+
+    <string name="fix_vpn_title">All pages blocked by VPN screen or 403 error (including local LAN)</string>
+    <string name="fix_vpn_symptoms">Every site shows the "VPN is disconnected" overlay, or Orbot/SOCKS proxy traffic fails, or local router addresses (192.168.x.x) cannot be opened.</string>
+    <string name="fix_vpn_cause">VPN Kill-Switch verifies that Android\'s active network has TRANSPORT_VPN. Local proxies without a VPN interface and LAN gateways without a tunnel are blocked.</string>
+    <string name="fix_vpn_fix">Connect a VPN app and tap "Check again", or temporarily turn off Settings → VPN → "Block requests without VPN". Note: "Open start page without waiting" only skips the startup check, not network blocking.</string>
+
+    <string name="fix_render_title">Inverted colors, unreadable text, broken zoom, downloads, or search</string>
+    <string name="fix_render_symptoms">Photos/logos look inverted or dark text sits on a dark background; cards overlap; PDF/file downloads do not start; typing words in the URL bar does not search.</string>
+    <string name="fix_render_cause">Force dark mode alters page CSS/images; high text zoom breaks rigid layouts; downloads are off by default for safety; search can be set to Off or an invalid Custom URL without %s.</string>
+    <string name="fix_render_fix" formatted="false">Settings → Everyday: turn off "Force dark mode", reset "Text zoom" to 100%, enable "Allow file downloads" when needed, or verify your Search Engine (Custom URL must include %s).</string>
+
+    <string name="fix_session_title">Logged out after closing app or screenshots missing in Gallery</string>
+    <string name="fix_session_symptoms">Every app restart signs you out of accounts and empties shopping carts; newly taken screenshots do not appear in the system Gallery.</string>
+    <string name="fix_session_cause">Auto-Wipe on exit erases cookies, storage, cache, and rotates the fingerprint seed when leaving. Hidden storage saves screenshots privately inside the app.</string>
+    <string name="fix_session_fix">Settings → Session: turn off "Auto-Wipe on app exit" to keep logins. Settings → Capture: switch destination to "Gallery" or export from the in-app Hidden Screenshots viewer.</string>
+    <string name="http_warn_title">Unencrypted HTTP connection</string>
+    <string name="http_warn_body">You are about to open %1$s over plain HTTP without encryption. Traffic may be intercepted or modified on the network.</string>
+    <string name="http_warn_proceed">Open anyway</string>
+
+    <string name="ssl_warn_title">Invalid SSL certificate</string>
+    <string name="ssl_warn_body">The security certificate for %1$s is not trusted or has expired. Proceeding exposes your connection to interception.</string>
+    <string name="ssl_warn_proceed">Proceed anyway</string>
+    <string name="site_info_https_secure">Encrypted HTTPS connection</string>
+    <string name="site_info_http_unencrypted">Unencrypted HTTP connection</string>
+    <string name="site_info_ssl_bypassed">SSL certificate warning bypassed</string>
+    <string name="site_info_local_page">Local / empty page</string>
+    <string name="site_info_vpn_on">VPN Kill-Switch: active (tunnel connected)</string>
+    <string name="site_info_vpn_down">VPN Kill-Switch: waiting for VPN tunnel</string>
+    <string name="site_info_vpn_off">VPN Kill-Switch: disabled</string>
+    <string name="site_info_active_profile">Quick profile switch</string>
+    <string name="site_info_blocked_header">Blocked trackers on page (%1$d)</string>
+    <string name="site_info_blocked_none">No blocked requests recorded on this page yet.</string>
+    <string name="site_info_rule_keep">+ Blocklist</string>
+    <string name="site_info_rule_remove">Remove rule</string>
+    <string name="site_info_rule_added">Added %1$s to custom blocklist</string>
+    <string name="site_info_rule_removed">Removed %1$s from custom blocklist</string>
+    <string name="site_info_cert_section">Certificate</string>
+    <string name="site_info_cert_issued_to">Issued to</string>
+    <string name="site_info_cert_issued_by">Issued by</string>
+    <string name="site_info_cert_validity">Valid</string>
+    <string name="site_info_cert_days_left">%1$dd left</string>
+    <string name="site_info_cert_expired">Expired</string>
+    <string name="site_info_cert_details_toggle">Technical details</string>
+    <string name="site_info_cert_algorithm">Signature &amp; key</string>
+    <string name="site_info_cert_serial">Serial</string>
+    <string name="site_info_cert_sans">Domains (SAN)</string>
+    <string name="site_info_cert_sha256">SHA-256</string>
+    <string name="site_info_cert_copied">SHA-256 copied</string>
+    <string name="site_info_cert_unavailable">Certificate info unavailable</string>
+    <string name="site_info_cert_none">No TLS certificate</string>
+
+    <string name="pin_title">Enter PIN</string>
+    <string name="pin_subtitle">Stealth Snake is locked</string>
+    <string name="pin_hint">4–8 digit PIN</string>
+    <string name="pin_unlock">Unlock</string>
+    <string name="pin_wrong">Incorrect PIN (%1$d attempts left before Wipe)</string>
+    <string name="pin_wrong_simple">Incorrect PIN</string>
+    <string name="pin_locked_out">Too many attempts. Try again in %1$d s.</string>
+    <string name="pin_wiped">Too many failed attempts — session wiped</string>
+    <string name="pin_setup_title">Set PIN lock</string>
+    <string name="pin_setup_body">Choose a 4–8 digit PIN to lock the browser on launch and when returning from background.</string>
+    <string name="pin_setup_invalid">PIN must be 4–8 digits</string>
+    <string name="pin_saved">PIN lock enabled</string>
+    <string name="pin_removed">PIN lock removed</string>
+    <string name="pref_pin_set">Set / change PIN lock</string>
+    <string name="pref_pin_remove">Remove PIN lock</string>
+    <string name="pref_pin_auto_wipe">Auto-Wipe after 5 wrong PINs</string>
+    <string name="desc_pin_auto_wipe">Automatically erases cookies, storage, captures, offline pages, and custom settings if an intruder fails PIN 5 times.</string>
+    <string name="pin_confirm_hint">Confirm 4–8 digit PIN</string>
+    <string name="pin_setup_mismatch">PIN entries do not match</string>
+    <string name="pin_verify_current_title">Verify current PIN</string>
+    <string name="pin_verify_current_body">Enter your current PIN before setting a new one.</string>
+    <string name="pin_verify_remove_title">Verify PIN to remove lock</string>
+    <string name="pin_verify_disable_autowipe_title">Verify PIN to disable Auto-Wipe</string>
+    <string name="pref_auto_clear_offline">Clear offline &amp; downloads on Wipe</string>
+    <string name="desc_auto_clear_offline">Clears saved offline archives and the in-app download list whenever the session is wiped.</string>
+    <string name="reset_confirm_title">Reset settings to defaults?</string>
+    <string name="reset_confirm_body">Privacy flags, custom blocklist rules, profiles, and home URL will return to factory defaults. Your PIN lock will stay active.</string>
+    <string name="action_reset">Reset</string>
+    <string name="onboarding_pin_cta">Set PIN now</string>
+    <string name="onboarding_title_pin">Protect access with a PIN</string>
+    <string name="onboarding_body_pin">Optionally set a 4–8 digit PIN to lock Stealth Snake when you switch apps, with automatic session wipe after 5 failed attempts.</string>
+
+    <string name="btn_reader_mode">Reader Mode</string>
+    <string name="reader_unavailable">Reader Mode could not extract article text from this page.</string>
+    <string name="reader_close">Close</string>
+
+    <string name="btn_save_offline">Save page offline</string>
+    <string name="offline_saved">Saved offline: %1$s</string>
+    <string name="offline_save_failed">Could not save page offline</string>
+
+    <string name="btn_downloads">Downloads</string>
+    <string name="downloads_title">Downloads &amp; Offline</string>
+    <string name="downloads_clear_history">Clear list</string>
+    <string name="downloads_disabled_notice">File downloads are currently disabled in Settings. Enable them to save files from websites.</string>
+    <string name="downloads_enable_in_settings">Enable in Settings</string>
+    <string name="downloads_section_files">Recent downloads</string>
+    <string name="downloads_section_pages">Saved offline pages</string>
+    <string name="downloads_empty_files">No downloaded files recorded yet.</string>
+    <string name="downloads_empty_pages">No saved offline pages yet. Use the menu → Save page offline.</string>
+    <string name="downloads_status_saved">Saved</string>
+    <string name="downloads_status_failed">Failed</string>
+    <string name="downloads_open_offline">Open offline</string>
+
+    <string name="external_scheme_title">Open external link?</string>
+    <string name="external_scheme_message">A page wants to open \"%1$s\" in an external app. External apps are outside Stealth Snake\'s privacy sandbox.</string>
+    <string name="external_scheme_open">Open app</string>
+    <string name="external_scheme_no_app">No app installed for %1$s links</string>
+    <string name="renderer_crashed_notice">Web renderer crashed and was cleanly restarted</string>
+    <string name="file_upload_blocked_notice">File uploads are blocked in Stealth Snake\'s isolated sandbox</string>
+    <string name="site_info_blocked_item">%1$s (%2$d)</string>
+    <string name="captures_item_meta">%1$s · %2$s</string>
+    <string name="downloads_item_meta">%1$s · %2$s · %3$s</string>
+    <string name="downloads_page_meta">%1$s · %2$d KB · %3$s</string>
+    <string name="jitter_seconds_format">%1$d s</string>
+
+    <!-- Multi-session switcher -->
+    <string name="sessions_sheet_title">Isolated Sessions (%1$d)</string>
+    <string name="sessions_new">New session</string>
+    <string name="sessions_wipe_all">Wipe all</string>
+    <string name="sessions_blank_title">New Isolated Session</string>
+    <string name="sessions_active_badge">Active</string>
+    <string name="sessions_close_desc">Close session</string>
+    <string name="sessions_badge_desc">Open sessions: %1$d</string>
+    <string name="sessions_blocked_count">%1$d blocked</string>
+    <string name="status_switched_session">Switched to session %1$d/%2$d</string>
+    <string name="status_closed_session">Session closed</string>
+
+    <!-- PIN UI redesign -->
+    <string name="pin_auto_wipe_badge">Auto-wipe armed after 5 failed attempts</string>
+    <string name="pin_clear_key">CLR</string>
+    <string name="pin_backspace_desc">Delete digit</string>
+    <string name="pin_new_label">New PIN (4–8 digits)</string>
+    <string name="pin_confirm_label">Confirm PIN</string>
+    <string name="pin_current_label">Current PIN</string>
+    <string name="pin_status_enabled">PIN lock is active</string>
+    <string name="pin_status_disabled">PIN lock is not set</string>
+    <string name="pref_pin_change">Change PIN lock</string>
+
+    <!-- Reorganized Settings categories -->
+    <string name="nav_security">Security</string>
+    <string name="cat_security">Privacy &amp; Security</string>
+    <string name="cat_appearance">Appearance &amp; Language</string>
+    <string name="subcat_vpn">VPN Kill-Switch</string>
+    <string name="subcat_blocking">Traffic &amp; Trackers</string>
+    <string name="subcat_fingerprint">Anti-Fingerprinting</string>
+    <string name="subcat_behavior">Behavior &amp; Dialogs</string>
+    <string name="subcat_pin_lock">PIN Lock</string>
+    <string name="subcat_session_wipe">Session &amp; Wipe</string>
+    <string name="subcat_captures">Screen &amp; Captures</string>
+    <string name="subcat_display">Display &amp; Reading</string>
+    <string name="theme_system_dynamic">System</string>
+
+    <string name="download_confirm_title">Download file?</string>
+    <string name="download_confirm_message">File: %1$s\nSource: %2$s</string>
+    <string name="download_confirm_http_warning">\n\nWarning: Unencrypted HTTP connection. This file can be read or modified in transit.</string>
+    <string name="download_confirm_action">Download</string>
+    <string name="status_capture_gallery_requires_q">Gallery export requires Android 10 or newer</string>
+    <string name="site_info_snake_script_unsupported">Anti-fingerprinting scripts inactive (WebView lacks DOCUMENT_START_SCRIPT support)</string>
+</resources>

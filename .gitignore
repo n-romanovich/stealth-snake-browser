@@ -1,0 +1,25 @@
+# Gradle & Kotlin caches
+.gradle/
+.kotlin/
+build/
+**/build/
+
+# IDE & OS files
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local configuration & secrets
+local.properties
+*.jks
+*.keystore
+
+# Android build outputs
+*.apk
+*.ap_
+*.aab
+*.dex
+
+# Node / JS test artifacts if installed locally
+node_modules/

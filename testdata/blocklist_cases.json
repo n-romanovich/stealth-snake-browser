@@ -1,0 +1,23 @@
+[
+  {"url": "https://google-analytics.com/g/collect", "subresource": true, "blocked": true},
+  {"url": "https://www.google-analytics.com/analytics.js", "subresource": true, "blocked": true},
+  {"url": "https://a.b.sentry.io/api/1/envelope/", "subresource": true, "blocked": true},
+  {"url": "https://GOOGLE-ANALYTICS.COM/x", "subresource": true, "blocked": true},
+  {"url": "https://google-analytics.com./x", "subresource": true, "blocked": true},
+  {"url": "https://google-analytics.com:8443/x", "subresource": true, "blocked": true},
+  {"url": "https://notgoogle-analytics.com/x", "subresource": true, "blocked": false},
+  {"url": "https://google-analytics.com.evil.example/x", "subresource": true, "blocked": false},
+  {"url": "https://example.org/sentry.io", "subresource": true, "blocked": false},
+  {"url": "https://example.org/beacon", "subresource": true, "blocked": true},
+  {"url": "https://example.org/beacon/v2/ping", "subresource": true, "blocked": true},
+  {"url": "https://example.org/beacons", "subresource": true, "blocked": false},
+  {"url": "https://example.org/a/beacon", "subresource": true, "blocked": false},
+  {"url": "https://example.org/collect?x=1", "subresource": true, "blocked": true},
+  {"url": "https://example.org/telemetry", "subresource": true, "blocked": true},
+  {"url": "https://example.org/beacon", "subresource": false, "blocked": false},
+  {"url": "https://example.org/index.html", "subresource": true, "blocked": false},
+  {"url": "https://google-analytics.com/", "subresource": false, "blocked": false},
+  {"url": "https://datadome.co/captcha", "subresource": true, "blocked": true},
+  {"url": "https://connect.facebook.net/en_US/fbevents.js", "subresource": true, "blocked": true},
+  {"url": "https://facebook.net/x", "subresource": true, "blocked": false}
+]
