@@ -401,7 +401,11 @@ object BrowserUiHelper {
                     }
                 }
 
-                val rawUrl = session.webView.url?.takeIf { it.isNotBlank() } ?: session.currentUrl
+                val rawUrl = if (session.isWebViewAttached) {
+                    session.webView.url?.takeIf { it.isNotBlank() } ?: session.currentUrl
+                } else {
+                    session.currentUrl
+                }
                 val host = runCatching { Uri.parse(rawUrl).host }.getOrNull().orEmpty()
                 val displayTitle = when {
                     session.currentTitle.isNotBlank() -> session.currentTitle
@@ -505,6 +509,149 @@ object BrowserUiHelper {
         root.addView(bottomBar)
 
         renderList()
+        sheet.setContentView(root)
+        sheet.setOnShowListener {
+            sheet.window?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
+                ?.setBackgroundColor(Color.TRANSPARENT)
+        }
+        sheet.show()
+        return sheet
+    }
+
+    fun showBookmarksSheet(
+        activity: Activity,
+        palette: ThemePalette,
+        bookmarksProvider: () -> List<EncryptedSessionStore.Bookmark>,
+        onSelectBookmark: (EncryptedSessionStore.Bookmark) -> Unit,
+        onDeleteBookmark: (EncryptedSessionStore.Bookmark) -> Unit
+    ): BottomSheetDialog {
+        val colors = SnakeTheme.resolveDialogColors(palette, activity)
+        val density = activity.resources.displayMetrics.density
+        val isLight = SnakeTheme.resolveTokens(palette, activity).isLight
+        val rippleColor = ColorUtils.setAlphaComponent(if (isLight) Color.BLACK else Color.WHITE, 30)
+
+        val sheet = BottomSheetDialog(activity)
+        val root = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            val outer = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(colors.dialogBg)
+                val topR = 28f * density
+                cornerRadii = floatArrayOf(topR, topR, topR, topR, 0f, 0f, 0f, 0f)
+            }
+            background = outer
+            setPadding((14 * density).toInt(), (10 * density).toInt(), (14 * density).toInt(), (18 * density).toInt())
+        }
+
+        val handle = View(activity).apply {
+            background = SnakeTheme.roundedSurface(colors.body, Color.TRANSPARENT, 2f, density)
+            alpha = 0.35f
+            layoutParams = LinearLayout.LayoutParams((36 * density).toInt(), (4 * density).toInt()).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                topMargin = (2 * density).toInt()
+                bottomMargin = (14 * density).toInt()
+            }
+        }
+        root.addView(handle)
+
+        val titleView = TextView(activity).apply {
+            text = activity.getString(R.string.bookmarks_title)
+            textSize = 20f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(colors.title)
+            setPadding((10 * density).toInt(), 0, (10 * density).toInt(), (12 * density).toInt())
+        }
+        root.addView(titleView)
+
+        val listContainer = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val listScroll = ScrollView(activity).apply {
+            addView(listContainer)
+        }
+        root.addView(listScroll, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            1f
+        ))
+
+        lateinit var renderBookmarks: () -> Unit
+        renderBookmarks = {
+            listContainer.removeAllViews()
+            val items = bookmarksProvider()
+            if (items.isEmpty()) {
+                listContainer.addView(TextView(activity).apply {
+                    text = activity.getString(R.string.bookmarks_empty)
+                    textSize = 14f
+                    setTextColor(colors.body)
+                    gravity = Gravity.CENTER
+                    setPadding((12 * density).toInt(), (24 * density).toInt(), (12 * density).toInt(), (24 * density).toInt())
+                })
+            } else {
+                val gap = (8 * density).toInt()
+                items.forEachIndexed { idx, bookmark ->
+                    val row = LinearLayout(activity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        val pH = (14 * density).toInt()
+                        val pV = (12 * density).toInt()
+                        setPadding(pH, pV, (6 * density).toInt(), pV)
+                        background = SnakeTheme.pillRippleSurface(colors.secondaryBg, rippleColor, 18f, density)
+                        layoutParams = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            if (idx > 0) topMargin = gap
+                        }
+                        setOnClickListener {
+                            sheet.dismiss()
+                            onSelectBookmark(bookmark)
+                        }
+                    }
+                    val textCol = LinearLayout(activity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                            marginEnd = (6 * density).toInt()
+                        }
+                    }
+                    textCol.addView(TextView(activity).apply {
+                        text = bookmark.title
+                        textSize = 15.5f
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        setTextColor(colors.title)
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.END
+                    })
+                    textCol.addView(TextView(activity).apply {
+                        text = bookmark.url
+                        textSize = 13f
+                        setTextColor(colors.body)
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.END
+                        setPadding(0, (2 * density).toInt(), 0, 0)
+                    })
+                    val closeMask = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) }
+                    val deleteBtn = TextView(activity).apply {
+                        text = "✕"
+                        textSize = 15f
+                        gravity = Gravity.CENTER
+                        setTextColor(colors.body)
+                        contentDescription = activity.getString(R.string.bookmark_delete_desc)
+                        background = RippleDrawable(ColorStateList.valueOf(rippleColor), null, closeMask)
+                        layoutParams = LinearLayout.LayoutParams((40 * density).toInt(), (40 * density).toInt())
+                        setOnClickListener {
+                            onDeleteBookmark(bookmark)
+                            renderBookmarks()
+                        }
+                    }
+                    row.addView(textCol)
+                    row.addView(deleteBtn)
+                    listContainer.addView(row)
+                }
+            }
+        }
+
+        renderBookmarks()
         sheet.setContentView(root)
         sheet.setOnShowListener {
             sheet.window?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)

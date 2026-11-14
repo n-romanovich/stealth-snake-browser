@@ -563,17 +563,111 @@ class SnakePreferences(context: Context) {
     fun parsedCustomRules(): List<String> =
         BlocklistEngine.fromRules(customBlocklistRaw.lines()).rules
 
-    fun toSnakeFeatureFlags(): SnakeScript.FeatureFlags =
-        SnakeScript.FeatureFlags(
+    data class EffectivePolicy(
+        val builtinBlocklistEnabled: Boolean,
+        val customBlocklistRaw: String,
+        val blockWebRtcIce: Boolean,
+        val blockBeacons: Boolean,
+        val noiseCanvasWebgl: Boolean,
+        val noiseAudio: Boolean,
+        val hideVisibilityFocus: Boolean,
+        val lockViewport: Boolean,
+        val sensorFallback: Boolean,
+        val fuzzPerformanceNow: Boolean,
+        val microJitterEnabled: Boolean,
+        val blockExternalSchemes: Boolean,
+        val suppressJsDialogs: Boolean,
+        val forceDarkPages: Boolean,
+        val allowFileUploads: Boolean,
+        val allowOAuthPopups: Boolean
+    ) {
+        fun parsedCustomRules(): List<String> =
+            BlocklistEngine.fromRules(customBlocklistRaw.lines()).rules
+
+        fun toSnakeFeatureFlags(): SnakeScript.FeatureFlags =
+            SnakeScript.FeatureFlags(
+                noiseCanvasWebgl = noiseCanvasWebgl,
+                noiseAudio = noiseAudio,
+                hideVisibilityFocus = hideVisibilityFocus,
+                lockViewport = lockViewport,
+                sensorFallback = sensorFallback,
+                fuzzPerformanceNow = fuzzPerformanceNow,
+                blockWebRtcIce = blockWebRtcIce,
+                blockBeacons = blockBeacons
+            )
+    }
+
+    fun resolvePolicy(
+        presetOverride: String? = null,
+        profileIdOverride: String? = null
+    ): EffectivePolicy {
+        val profile = profileIdOverride?.takeIf { it.isNotBlank() }?.let { id ->
+            listProfiles().firstOrNull { it.id == id }
+        }
+        if (profile != null) {
+            return EffectivePolicy(
+                builtinBlocklistEnabled = profile.builtinBlocklistEnabled,
+                customBlocklistRaw = profile.customBlocklistRaw,
+                blockWebRtcIce = profile.blockWebRtcIce,
+                blockBeacons = profile.blockBeacons,
+                noiseCanvasWebgl = profile.noiseCanvasWebgl,
+                noiseAudio = profile.noiseAudio,
+                hideVisibilityFocus = profile.hideVisibilityFocus,
+                lockViewport = profile.lockViewport,
+                sensorFallback = profile.sensorFallback,
+                fuzzPerformanceNow = profile.fuzzPerformanceNow,
+                microJitterEnabled = profile.microJitterEnabled,
+                blockExternalSchemes = profile.blockExternalSchemes,
+                suppressJsDialogs = profile.suppressJsDialogs,
+                forceDarkPages = profile.forceDarkPages,
+                allowFileUploads = profile.allowFileUploads,
+                allowOAuthPopups = profile.allowOAuthPopups
+            )
+        }
+        val chosenPreset = presetOverride?.takeIf { it.isNotBlank() }?.let { ProtectionPreset.fromKey(it) }
+        if (chosenPreset == ProtectionPreset.MAX_STEALTH || chosenPreset == ProtectionPreset.COMPATIBILITY) {
+            val max = (chosenPreset == ProtectionPreset.MAX_STEALTH)
+            return EffectivePolicy(
+                builtinBlocklistEnabled = true,
+                customBlocklistRaw = customBlocklistRaw,
+                blockWebRtcIce = true,
+                blockBeacons = true,
+                noiseCanvasWebgl = max,
+                noiseAudio = max,
+                hideVisibilityFocus = true,
+                lockViewport = max,
+                sensorFallback = max,
+                fuzzPerformanceNow = max,
+                microJitterEnabled = max,
+                blockExternalSchemes = true,
+                suppressJsDialogs = true,
+                forceDarkPages = forceDarkPages,
+                allowFileUploads = !max,
+                allowOAuthPopups = !max
+            )
+        }
+        return EffectivePolicy(
+            builtinBlocklistEnabled = builtinBlocklistEnabled,
+            customBlocklistRaw = customBlocklistRaw,
+            blockWebRtcIce = blockWebRtcIce,
+            blockBeacons = blockBeacons,
             noiseCanvasWebgl = noiseCanvasWebgl,
             noiseAudio = noiseAudio,
             hideVisibilityFocus = hideVisibilityFocus,
             lockViewport = lockViewport,
             sensorFallback = sensorFallback,
             fuzzPerformanceNow = fuzzPerformanceNow,
-            blockWebRtcIce = blockWebRtcIce,
-            blockBeacons = blockBeacons
+            microJitterEnabled = microJitterEnabled,
+            blockExternalSchemes = blockExternalSchemes,
+            suppressJsDialogs = suppressJsDialogs,
+            forceDarkPages = forceDarkPages,
+            allowFileUploads = allowFileUploads,
+            allowOAuthPopups = allowOAuthPopups
         )
+    }
+
+    fun toSnakeFeatureFlags(): SnakeScript.FeatureFlags =
+        resolvePolicy().toSnakeFeatureFlags()
 
     companion object {
         private const val PREFS_NAME = "stealth_snake_prefs"

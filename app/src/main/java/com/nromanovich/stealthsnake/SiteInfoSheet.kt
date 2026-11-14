@@ -16,6 +16,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -47,7 +48,9 @@ object SiteInfoSheet {
         val sslBypassed: Boolean,
         val blockedHosts: Map<String, Int>,
         val certificate: SslCertificate? = null,
-        val scriptProtectionActive: Boolean = true
+        val scriptProtectionActive: Boolean = true,
+        val sessionPresetOverride: String? = null,
+        val sessionProfileIdOverride: String? = null
     )
 
     data class CertificateDetails(
@@ -69,7 +72,8 @@ object SiteInfoSheet {
         activity: Activity,
         prefs: SnakePreferences,
         state: PageSecurityState,
-        onProfileOrBlocklistChanged: (reloadPage: Boolean) -> Unit
+        onProfileOrBlocklistChanged: (reloadPage: Boolean) -> Unit,
+        onSessionProfileSelected: ((presetOverride: String?, profileIdOverride: String?) -> Unit)? = null
     ): AlertDialog {
         val palette = prefs.themePalette
         val dc = SnakeTheme.resolveDialogColors(palette, activity)
@@ -154,6 +158,23 @@ object SiteInfoSheet {
             }
         )
         content.addView(blockedSec)
+
+        if (onSessionProfileSelected != null) {
+            content.addView(
+                buildSessionProfileSection(
+                    activity = activity,
+                    prefs = prefs,
+                    state = state,
+                    colors = dc,
+                    rippleColor = rippleColor,
+                    density = density,
+                    onChoose = { chosenPreset, chosenProfileId ->
+                        dialog.dismiss()
+                        onSessionProfileSelected(chosenPreset, chosenProfileId)
+                    }
+                )
+            )
+        }
 
         // Bottom right-aligned filled primary pill Close button
         val footer = LinearLayout(activity).apply {
@@ -294,6 +315,90 @@ object SiteInfoSheet {
             density = density
         )
         return pill
+    }
+
+    private fun buildSessionProfileSection(
+        activity: Activity,
+        prefs: SnakePreferences,
+        state: PageSecurityState,
+        colors: SnakeTheme.ExpressiveDialogColors,
+        rippleColor: Int,
+        density: Float,
+        onChoose: (presetOverride: String?, profileIdOverride: String?) -> Unit
+    ): LinearLayout {
+        val section = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((4 * density).toInt(), (16 * density).toInt(), (4 * density).toInt(), 0)
+        }
+        section.addView(sectionLabel(activity, activity.getString(R.string.session_profile_label), colors, density))
+
+        val row = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        data class Choice(val label: String, val presetKey: String?, val profileId: String?, val selected: Boolean)
+        val noOverride = state.sessionPresetOverride.isNullOrBlank() && state.sessionProfileIdOverride.isNullOrBlank()
+        val choices = buildList {
+            add(Choice(activity.getString(R.string.session_profile_default), null, null, noOverride))
+            add(
+                Choice(
+                    activity.getString(R.string.preset_max_stealth),
+                    ProtectionPreset.MAX_STEALTH.key,
+                    null,
+                    state.sessionProfileIdOverride.isNullOrBlank() &&
+                        state.sessionPresetOverride == ProtectionPreset.MAX_STEALTH.key
+                )
+            )
+            add(
+                Choice(
+                    activity.getString(R.string.preset_compatibility),
+                    ProtectionPreset.COMPATIBILITY.key,
+                    null,
+                    state.sessionProfileIdOverride.isNullOrBlank() &&
+                        state.sessionPresetOverride == ProtectionPreset.COMPATIBILITY.key
+                )
+            )
+            for (profile in prefs.listProfiles()) {
+                add(
+                    Choice(
+                        profile.name,
+                        null,
+                        profile.id,
+                        state.sessionProfileIdOverride == profile.id
+                    )
+                )
+            }
+        }
+
+        choices.forEachIndexed { idx, choice ->
+            val bg = if (choice.selected) colors.positiveBg else colors.secondaryBg
+            val fg = if (choice.selected) colors.positiveText else colors.title
+            val chip = TextView(activity).apply {
+                text = choice.label
+                textSize = 13f
+                typeface = Typeface.create("sans-serif-medium", if (choice.selected) Typeface.BOLD else Typeface.NORMAL)
+                setTextColor(fg)
+                gravity = Gravity.CENTER
+                minHeight = (34 * density).toInt()
+                setPadding((14 * density).toInt(), (6 * density).toInt(), (14 * density).toInt(), (6 * density).toInt())
+                background = SnakeTheme.pillRippleSurface(bg, rippleColor, 17f, density)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    if (idx > 0) marginStart = (8 * density).toInt()
+                }
+                setOnClickListener { onChoose(choice.presetKey, choice.profileId) }
+            }
+            row.addView(chip)
+        }
+
+        section.addView(HorizontalScrollView(activity).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(row)
+        })
+        return section
     }
 
     private fun buildCryptographySection(

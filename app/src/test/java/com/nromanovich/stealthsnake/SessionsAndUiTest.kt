@@ -11,6 +11,7 @@ import android.widget.ImageButton
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -445,6 +446,92 @@ class SessionsAndUiTest {
         // Search overlay closes and opens matching VPN category sub-screen
         assertTrue(collectAll<EditText>(root).none { it.hint?.toString() == ctx.getString(R.string.settings_search_hint) })
         assertEquals(View.GONE, hubScroll.visibility)
+        controller.pause().destroy()
+    }
+
+    @Test
+    fun `LRU eviction caps live WebViews at 4 and reattaches evicted session on switch`() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        val tab0 = activity.getActiveSessionForTest().apply {
+            lastActiveAtMs = 100L
+            currentUrl = "https://zero.example"
+        }
+        val tab1 = activity.createNewSession(loadHome = false, switchTo = false).apply {
+            lastActiveAtMs = 50L
+            currentUrl = "https://one.example"
+        }
+        val tab2 = activity.createNewSession(loadHome = false, switchTo = false).apply {
+            lastActiveAtMs = 200L
+            currentUrl = "https://two.example"
+        }
+        val tab3 = activity.createNewSession(loadHome = false, switchTo = false).apply {
+            lastActiveAtMs = 300L
+            currentUrl = "https://three.example"
+        }
+        val tab4 = activity.createNewSession(loadHome = false, switchTo = false).apply {
+            lastActiveAtMs = 400L
+            currentUrl = "https://four.example"
+        }
+        ShadowLooper.idleMainLooper()
+
+        val sessions = activity.getSessionsForTest()
+        assertEquals(5, sessions.size)
+        assertEquals(4, sessions.count { it.isWebViewAttached })
+        assertFalse("Oldest background tab (tab1) should be evicted", tab1.isWebViewAttached)
+        assertTrue(tab0.isWebViewAttached)
+        assertTrue(tab2.isWebViewAttached)
+        assertTrue(tab3.isWebViewAttached)
+        assertTrue(tab4.isWebViewAttached)
+
+        val destroyedWebView = tab1.webView
+        activity.switchToSession(tab1)
+        ShadowLooper.idleMainLooper()
+
+        assertTrue(tab1.isWebViewAttached)
+        assertTrue(tab1.webView !== destroyedWebView)
+        assertEquals("https://one.example", Shadows.shadowOf(tab1.webView).lastLoadedUrl)
+        assertEquals(4, activity.getSessionsForTest().count { it.isWebViewAttached })
+        assertFalse("Next LRU background tab (tab0) should now be evicted", tab0.isWebViewAttached)
+
+        controller.pause().destroy()
+    }
+
+    @Test
+    fun `per-session preset override isolates Compatibility mode to a single tab`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = SnakePreferences(ctx).apply {
+            applyPreset(ProtectionPreset.MAX_STEALTH)
+        }
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        val tab1 = activity.getActiveSessionForTest()
+        val tab2 = activity.createNewSession(loadHome = false, switchTo = false)
+        ShadowLooper.idleMainLooper()
+
+        activity.findViewById<View>(R.id.siteSecurityIcon).performClick()
+        ShadowLooper.idleMainLooper()
+
+        val dialog = ShadowAlertDialog.getLatestDialog() as androidx.appcompat.app.AlertDialog
+        assertTrue(dialog.isShowing)
+        val compatChip = findTextView(dialog.window!!.decorView, ctx.getString(R.string.preset_compatibility))!!
+        compatChip.performClick()
+        ShadowLooper.idleMainLooper()
+
+        assertEquals(ProtectionPreset.COMPATIBILITY.key, tab1.presetOverride)
+        assertEquals(null, tab2.presetOverride)
+        assertEquals(ProtectionPreset.MAX_STEALTH, prefs.preset)
+
+        val tab1Policy = prefs.resolvePolicy(tab1.presetOverride, tab1.profileIdOverride)
+        val tab2Policy = prefs.resolvePolicy(tab2.presetOverride, tab2.profileIdOverride)
+        assertFalse(tab1Policy.noiseCanvasWebgl)
+        assertFalse(tab1Policy.lockViewport)
+        assertTrue(tab1Policy.allowFileUploads)
+        assertTrue(tab1Policy.allowOAuthPopups)
+        assertTrue(tab2Policy.noiseCanvasWebgl)
+        assertTrue(tab2Policy.lockViewport)
+        assertFalse(tab2Policy.allowFileUploads)
+
         controller.pause().destroy()
     }
 

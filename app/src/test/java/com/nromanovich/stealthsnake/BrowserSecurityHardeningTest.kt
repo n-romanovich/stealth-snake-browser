@@ -420,6 +420,74 @@ class BrowserSecurityHardeningTest {
         assertEquals(200, intercepted!!.statusCode)
     }
 
+    @Test
+    fun `encryptedSessionStore protects tabs, refuses save under autoWipe, manages bookmarks, and cryptoErases`() {
+        val store = EncryptedSessionStore(ctx)
+        val tab = EncryptedSessionStore.SavedTab(
+            id = 7L,
+            url = "https://private.example/page",
+            title = "Private",
+            sessionSeed = "seed-123",
+            presetOverride = ProtectionPreset.COMPATIBILITY.key
+        )
+        store.saveTabs(listOf(tab), activeIndex = 0, autoWipeOnExit = true)
+        assertNull("Tabs must never persist when autoWipeOnExit is enabled", store.loadTabs(autoWipeOnExit = true))
+
+        store.saveTabs(listOf(tab), activeIndex = 0, autoWipeOnExit = false)
+        val loaded = store.loadTabs(autoWipeOnExit = false)
+        assertNotNull(loaded)
+        assertEquals(1, loaded!!.tabs.size)
+        assertEquals("https://private.example/page", loaded.tabs[0].url)
+        assertEquals("seed-123", loaded.tabs[0].sessionSeed)
+        assertEquals(ProtectionPreset.COMPATIBILITY.key, loaded.tabs[0].presetOverride)
+
+        val encFile = File(ctx.filesDir, "secure_store/sessions.enc")
+        assertTrue(encFile.exists())
+        assertFalse("Encrypted payload must not leak plaintext URLs", encFile.readText(Charsets.ISO_8859_1).contains("private.example"))
+
+        store.addBookmark("https://docs.example/ref", "Docs")
+        assertTrue(store.isBookmarked("https://docs.example/ref"))
+        assertEquals(1, store.listBookmarks().size)
+
+        store.cryptoEraseAll()
+        assertFalse(encFile.exists())
+        assertNull(store.loadTabs(autoWipeOnExit = false))
+        assertTrue(store.listBookmarks().isEmpty())
+    }
+
+    @Test
+    fun `mainActivity onSaveInstanceState stores zero URLs in Bundle and restores sessions cleanly`() {
+        val prefs = SnakePreferences(ctx).apply {
+            autoWipeOnExit = false
+            onboardingCompleted = true
+        }
+        val ctrl1 = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val a1 = ctrl1.get()
+        a1.getActiveSessionForTest().currentUrl = "https://sensitive-secret.example/token"
+        a1.createNewSession(loadHome = false, switchTo = true).currentUrl = "https://second-secret.example/doc"
+        ShadowLooper.idleMainLooper()
+
+        val savedState = Bundle()
+        ctrl1.saveInstanceState(savedState)
+        for (key in savedState.keySet()) {
+            @Suppress("DEPRECATION")
+            val rawVal = savedState.get(key)?.toString().orEmpty()
+            assertFalse("Bundle must never contain browsing URLs ($key)", rawVal.contains("sensitive-secret"))
+            assertFalse("Bundle must never contain browsing URLs ($key)", rawVal.contains("second-secret"))
+        }
+        ctrl1.pause().stop().destroy()
+
+        val ctrl2 = Robolectric.buildActivity(MainActivity::class.java).setup(savedState)
+        val a2 = ctrl2.get()
+        ShadowLooper.idleMainLooper()
+        assertEquals(2, a2.getSessionsForTest().size)
+        assertEquals("https://second-secret.example/doc", a2.getActiveSessionForTest().currentUrl)
+
+        a2.wipeSession(reloadBlank = false, reseed = false)
+        assertTrue(prefs.autoWipeOnExit == false)
+        ctrl2.pause().destroy()
+    }
+
     private fun collectEditTexts(root: View): List<EditText> {
         val out = mutableListOf<EditText>()
         fun walk(v: View) {

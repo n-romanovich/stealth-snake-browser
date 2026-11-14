@@ -112,6 +112,39 @@ class WebViewHardeningTest {
     }
 
     @Test
+    fun `renderer crash preserves sessionSeed, reloads last url, and halts on 10s crash loop`() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        val session = activity.getActiveSessionForTest()
+        val originalSeed = session.sessionSeed
+        session.currentUrl = "https://crash.example/article"
+
+        @Suppress("DEPRECATION")
+        val detail = object : RenderProcessGoneDetail() {
+            override fun didCrash(): Boolean = true
+            override fun rendererPriorityAtExit(): Int = 0
+        }
+
+        val firstWebView = session.webView
+        firstWebView.webViewClient.onRenderProcessGone(firstWebView, detail)
+        ShadowLooper.idleMainLooper()
+
+        assertEquals(originalSeed, session.sessionSeed)
+        assertNotSame(firstWebView, session.webView)
+        assertEquals("https://crash.example/article", Shadows.shadowOf(session.webView).lastLoadedUrl)
+
+        val secondWebView = session.webView
+        secondWebView.webViewClient.onRenderProcessGone(secondWebView, detail)
+        ShadowLooper.idleMainLooper()
+
+        assertEquals(originalSeed, session.sessionSeed)
+        assertNotSame(secondWebView, session.webView)
+        assertEquals(MainActivity.DEFAULT_START_URL, Shadows.shadowOf(session.webView).lastLoadedUrl)
+
+        controller.pause().destroy()
+    }
+
+    @Test
     fun `MainActivity with vpnBypassStartCheck updates kill-switch state across VPN transitions`() {
         val prefs = SnakePreferences(ctx)
         prefs.vpnKillSwitchEnabled = true

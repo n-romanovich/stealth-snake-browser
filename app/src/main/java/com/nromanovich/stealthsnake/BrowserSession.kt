@@ -13,6 +13,15 @@ class BrowserSession(
     var webView: WebView,
     var sessionSeed: String = SnakeScript.generateSessionSeed()
 ) {
+    val webViewProfileName: String = "tab_$id"
+    var isWebViewAttached: Boolean = true
+    var lastActiveAtMs: Long = System.currentTimeMillis()
+    var presetOverride: String? = null
+    var profileIdOverride: String? = null
+    var lastCrashRecoveryAtMs: Long = 0L
+    var lastCrashUrl: String = ""
+    var pendingRestoreUrl: String? = null
+
     lateinit var snakeClient: SnakeClient
     lateinit var snakeChrome: SnakeChrome
     var scriptHandler: ScriptHandler? = null
@@ -45,6 +54,9 @@ class BrowserSession(
         navigationGeneration++
         blockedRequestCount = 0
         pendingVpnUrl = null
+        lastCrashRecoveryAtMs = 0L
+        lastCrashUrl = ""
+        pendingRestoreUrl = null
         approvedHttpHosts.clear()
         resetPageSecurityState()
         currentUrl = MainActivity.DEFAULT_START_URL

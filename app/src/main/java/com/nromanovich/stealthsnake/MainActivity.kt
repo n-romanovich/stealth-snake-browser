@@ -51,10 +51,14 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.TextViewCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import androidx.webkit.ProfileStore
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.google.android.material.snackbar.Snackbar
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Minimal hardened browser host with Chrome-like top bar, pull-to-refresh,
@@ -102,6 +106,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     private lateinit var captureManager: CaptureManager
     private lateinit var offlinePagesManager: OfflinePagesManager
     private lateinit var downloadHelper: DownloadHelper
+    private lateinit var encryptedSessionStore: EncryptedSessionStore
     private lateinit var microJitter: MicroJitterController
 
     private val sessions = mutableListOf<BrowserSession>()
@@ -153,6 +158,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     private var pinOverlay: View? = null
     private var isPinLocked: Boolean = false
     private var pendingInitialLoad: Boolean = false
+    private var pendingRestoreAfterPinUrl: String? = null
     private var customFullscreenView: View? = null
     private var customFullscreenCallback: WebChromeClient.CustomViewCallback? = null
 
@@ -182,6 +188,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         snakeTemplate = SnakeScript.loadTemplate(this)
         captureManager = CaptureManager(this)
         offlinePagesManager = OfflinePagesManager(this)
+        encryptedSessionStore = EncryptedSessionStore(this)
         downloadHelper = DownloadHelper(
             context = this,
             vpnKillSwitchEnabled = { prefs.vpnKillSwitchEnabled },
@@ -189,6 +196,9 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             isUrlBlocked = { url ->
                 val enabled = prefs.builtinBlocklistEnabled || prefs.parsedCustomRules().isNotEmpty()
                 enabled && activeBlocklist.isBlocked(android.net.Uri.parse(url), false)
+            },
+            cookieProvider = { url ->
+                runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull()
             }
         )
         microJitter = MicroJitterController(
@@ -226,15 +236,31 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         })
 
         lastLoadedHomeUrl = prefs.homeUrl
+        val inMemoryRestore = savedInstanceState?.getString(STATE_RESTORE_TOKEN)
+            ?.let { ephemeralRestoreStates.remove(it) }
         val startAfterWipe = {
-            if (PinLockCoordinator.isLocked(prefs)) {
+            val restoredState = inMemoryRestore
+                ?: if (!prefs.autoWipeOnExit) encryptedSessionStore.loadTabs(autoWipeOnExit = false) else null
+            if (restoredState != null && restoredState.tabs.isNotEmpty()) {
+                applyRestoredSessionState(restoredState)
+                val targetUrl = activeSession.currentUrl
+                if (PinLockCoordinator.isLocked(prefs)) {
+                    pendingInitialLoad = true
+                    pendingRestoreAfterPinUrl = targetUrl
+                    showPinLockOverlay()
+                } else if (targetUrl.isNotBlank() && targetUrl != DEFAULT_START_URL) {
+                    safeLoadUrl(targetUrl)
+                } else {
+                    loadInitialHomePage()
+                }
+            } else if (PinLockCoordinator.isLocked(prefs)) {
                 pendingInitialLoad = true
                 showPinLockOverlay()
             } else {
                 loadInitialHomePage()
             }
         }
-        if (prefs.autoWipeOnExit && prefs.sessionDirty) {
+        if (prefs.autoWipeOnExit && prefs.sessionDirty && inMemoryRestore == null) {
             wipeSession(reloadBlank = false, reseed = true) {
                 startAfterWipe()
             }
@@ -277,9 +303,18 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         fullscreenContainer = findViewById(R.id.fullscreenContainer)
     }
 
+    private fun applySessionWebViewProfile(targetView: WebView, session: BrowserSession) {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+            runCatching {
+                WebViewCompat.setProfile(targetView, session.webViewProfileName)
+            }
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun configureWebView(session: BrowserSession = activeSession) {
         val targetView = session.webView
+        applySessionWebViewProfile(targetView, session)
         targetView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -324,11 +359,24 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(targetView, false)
         }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+            runCatching {
+                ProfileStore.getInstance()
+                    .getOrCreateProfile(session.webViewProfileName)
+                    .cookieManager
+                    .apply {
+                        setAcceptCookie(true)
+                        setAcceptThirdPartyCookies(targetView, false)
+                    }
+            }
+        }
 
+        val sessionPolicy = resolveSessionPolicy(session)
+        val sessionBlocklist = buildSessionBlocklist(sessionPolicy)
         val client = SnakeClient(
-            blocklist = activeBlocklist,
-            blocklistEnabled = prefs.builtinBlocklistEnabled || prefs.parsedCustomRules().isNotEmpty(),
-            blockExternalSchemes = prefs.blockExternalSchemes,
+            blocklist = sessionBlocklist,
+            blocklistEnabled = sessionPolicy.builtinBlocklistEnabled || sessionPolicy.parsedCustomRules().isNotEmpty(),
+            blockExternalSchemes = sessionPolicy.blockExternalSchemes,
             vpnKillSwitchEnabled = prefs.vpnKillSwitchEnabled,
             isVpnActive = { VpnGuard.isVpnActive(this) },
             onPageStartedCallback = { url ->
@@ -430,7 +478,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         targetView.webViewClient = client
 
         val chrome = SnakeChrome(
-            suppressDialogs = prefs.suppressJsDialogs,
+            suppressDialogs = sessionPolicy.suppressJsDialogs,
             onProgressChangedCallback = { progress ->
                 if (session === activeSession) {
                     if (progress in 1..99) {
@@ -531,6 +579,9 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         session.lastSnakeBuildSignature = null
     }
 
+    private fun resolveSessionPolicy(session: BrowserSession = activeSession): SnakePreferences.EffectivePolicy =
+        prefs.resolvePolicy(session.presetOverride, session.profileIdOverride)
+
     private fun buildEffectiveBlocklist(): BlocklistEngine {
         val rules = mutableListOf<String>()
         if (prefs.builtinBlocklistEnabled) {
@@ -540,25 +591,44 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         return BlocklistEngine.fromRules(rules)
     }
 
+    private fun buildSessionBlocklist(policy: SnakePreferences.EffectivePolicy): BlocklistEngine {
+        if (policy.builtinBlocklistEnabled == prefs.builtinBlocklistEnabled &&
+            policy.customBlocklistRaw == prefs.customBlocklistRaw
+        ) {
+            return activeBlocklist
+        }
+        val rules = mutableListOf<String>()
+        if (policy.builtinBlocklistEnabled) {
+            rules.addAll(builtinBlocklist.rules)
+        }
+        rules.addAll(policy.parsedCustomRules())
+        return BlocklistEngine.fromRules(rules)
+    }
+
     /** Memoized per [BlocklistEngine] instance so network callbacks don't re-join every rule on the UI thread. */
-    private fun blocklistSignature(): String {
-        val engine = activeBlocklist
-        blocklistSignatureCache?.let { (cached, sig) -> if (cached === engine) return sig }
-        val sig = buildString { engine.rules.forEach { append(it).append('\n') } }
-        blocklistSignatureCache = engine to sig
-        return sig
+    private fun blocklistSignatureFor(engine: BlocklistEngine): String {
+        if (engine === activeBlocklist) {
+            blocklistSignatureCache?.let { (cached, sig) -> if (cached === engine) return sig }
+            val sig = buildString { engine.rules.forEach { append(it).append('\n') } }
+            blocklistSignatureCache = engine to sig
+            return sig
+        }
+        return buildString { engine.rules.forEach { append(it).append('\n') } }
     }
 
     private fun installSnakeCore(session: BrowserSession = activeSession) {
+        if (!session.isWebViewAttached) return
+        val policy = resolveSessionPolicy(session)
+        val sessionBlocklist = buildSessionBlocklist(policy)
         val vpnDownWithKillSwitch = prefs.vpnKillSwitchEnabled && !VpnGuard.isVpnActive(this)
-        val flags = prefs.toSnakeFeatureFlags().copy(
+        val flags = policy.toSnakeFeatureFlags().copy(
             blockWebSockets = vpnDownWithKillSwitch,
-            blockWebRtcIce = prefs.blockWebRtcIce || vpnDownWithKillSwitch
+            blockWebRtcIce = policy.blockWebRtcIce || vpnDownWithKillSwitch
         )
         val signature = buildString {
             append(session.sessionSeed).append('|')
             append(flags).append('|')
-            append(blocklistSignature())
+            append(blocklistSignatureFor(sessionBlocklist))
         }
         if (signature == session.lastSnakeBuildSignature && session.scriptHandler != null) {
             return
@@ -567,7 +637,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         val compiled = SnakeScript.build(
             template = snakeTemplate,
             seed = session.sessionSeed,
-            blocklistRules = activeBlocklist.rules,
+            blocklistRules = sessionBlocklist.rules,
             flags = flags,
             chromeMajor = webViewChromeMajor,
             chromeFullVersion = webViewChromeFullVersion
@@ -634,7 +704,8 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             vpnBlockedView.visibility == View.VISIBLE ||
             readerOverlay != null ||
             customFullscreenView != null
-        if (prefs.microJitterEnabled && !blockedByOverlay && !isFinishing && !isDestroyed) {
+        val jitterEnabled = resolveSessionPolicy(activeSession).microJitterEnabled
+        if (jitterEnabled && !blockedByOverlay && !isFinishing && !isDestroyed) {
             microJitter.start()
         } else {
             microJitter.stop()
@@ -646,7 +717,11 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         statusRow.visibility = if (prefs.showStatusBar) View.VISIBLE else View.GONE
         activeBlocklist = buildEffectiveBlocklist()
 
-        sessions.forEach { applyRuntimePreferencesToSession(it) }
+        sessions.forEach {
+            if (it.isWebViewAttached) {
+                applyRuntimePreferencesToSession(it)
+            }
+        }
 
         microJitter.updateIdleRange(
             prefs.microJitterMinSec * 1000L,
@@ -671,13 +746,16 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     }
 
     private fun applyRuntimePreferencesToSession(session: BrowserSession) {
+        if (!session.isWebViewAttached) return
         val targetView = session.webView
+        val policy = resolveSessionPolicy(session)
+        val sessionBlocklist = buildSessionBlocklist(policy)
         targetView.setBackgroundColor(SnakeTheme.resolveBrowserColors(this, prefs.themePalette).bg)
         targetView.keepScreenOn = prefs.keepScreenOn
         targetView.settings.textZoom = prefs.textZoomPercent
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
             runCatching {
-                WebSettingsCompat.setAlgorithmicDarkeningAllowed(targetView.settings, prefs.forceDarkPages)
+                WebSettingsCompat.setAlgorithmicDarkeningAllowed(targetView.settings, policy.forceDarkPages)
             }
         }
 
@@ -694,11 +772,11 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             session.downloadListenerAttached = false
         }
 
-        session.snakeClient.blocklist = activeBlocklist
-        session.snakeClient.blocklistEnabled = activeBlocklist.rules.isNotEmpty()
-        session.snakeClient.blockExternalSchemes = prefs.blockExternalSchemes
+        session.snakeClient.blocklist = sessionBlocklist
+        session.snakeClient.blocklistEnabled = policy.builtinBlocklistEnabled || sessionBlocklist.rules.isNotEmpty()
+        session.snakeClient.blockExternalSchemes = policy.blockExternalSchemes
         session.snakeClient.vpnKillSwitchEnabled = prefs.vpnKillSwitchEnabled
-        session.snakeChrome.suppressDialogs = prefs.suppressJsDialogs
+        session.snakeChrome.suppressDialogs = policy.suppressJsDialogs
     }
 
     private fun bindControls() {
@@ -915,7 +993,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
      */
     private fun suspendBackgroundSessionsForVpnLoss() {
         sessions.forEach { s ->
-            if (s === activeSession) return@forEach
+            if (s === activeSession || !s.isWebViewAttached) return@forEach
             val url = s.webView.url
             if (url.isNullOrBlank() || url == DEFAULT_START_URL) return@forEach
             s.pendingVpnUrl = url
@@ -928,7 +1006,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
     private fun resumeBackgroundSessionsAfterVpn() {
         sessions.forEach { s ->
-            if (s === activeSession) return@forEach
+            if (s === activeSession || !s.isWebViewAttached) return@forEach
             val pending = s.pendingVpnUrl ?: return@forEach
             s.pendingVpnUrl = null
             runCatching { s.webView.loadUrl(pending) }
@@ -1086,6 +1164,17 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         if (isCurrent) {
             microJitter.stop()
         }
+        val liveUrl = (if (crashedSession.isWebViewAttached) crashedSession.webView.url else null)
+            ?.takeIf { it.isNotBlank() && it != DEFAULT_START_URL }
+        val crashUrl = (liveUrl ?: crashedSession.currentUrl).ifBlank { DEFAULT_START_URL }
+        val preservedSeed = crashedSession.sessionSeed
+        val prevCrashAt = crashedSession.lastCrashRecoveryAtMs
+        val prevCrashUrl = crashedSession.lastCrashUrl
+        val now = System.currentTimeMillis()
+        val isCrashLoop = crashUrl != DEFAULT_START_URL &&
+            crashUrl == prevCrashUrl &&
+            (now - prevCrashAt) in 0L..CRASH_LOOP_GUARD_MS
+
         clearScriptHandler(crashedSession)
         val crashed = crashedSession.webView
         runCatching {
@@ -1099,7 +1188,13 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             }
         }
         crashedSession.webView = replacement
+        crashedSession.isWebViewAttached = true
+        crashedSession.lastActiveAtMs = now
         crashedSession.resetSessionState()
+        crashedSession.sessionSeed = preservedSeed
+        crashedSession.lastCrashRecoveryAtMs = now
+        crashedSession.lastCrashUrl = crashUrl
+
         if (isCurrent) {
             swipeRefresh.addView(replacement)
             webView = replacement
@@ -1112,16 +1207,43 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         configureWebView(crashedSession)
         installSnakeCore(crashedSession)
         applyRuntimePreferencesToSession(crashedSession)
-        replacement.loadUrl(DEFAULT_START_URL)
+
+        val isHttpOrHttps = crashUrl.startsWith("https://", ignoreCase = true) ||
+            crashUrl.startsWith("http://", ignoreCase = true)
+        val canReload = !isCrashLoop && isHttpOrHttps
+        if (canReload && prefs.vpnKillSwitchEnabled && !VpnGuard.isVpnActive(this)) {
+            crashedSession.pendingVpnUrl = crashUrl
+            crashedSession.currentUrl = DEFAULT_START_URL
+            replacement.loadUrl(DEFAULT_START_URL)
+            if (isCurrent) {
+                updateStartPageCardVisibility(DEFAULT_START_URL)
+                updateUrlDisplay(DEFAULT_START_URL, forceUpdateText = true)
+            }
+        } else if (canReload) {
+            crashedSession.currentUrl = crashUrl
+            replacement.loadUrl(crashUrl)
+            if (isCurrent) {
+                updateStartPageCardVisibility(crashUrl)
+                updateUrlDisplay(crashUrl, forceUpdateText = true)
+            }
+        } else {
+            crashedSession.currentUrl = DEFAULT_START_URL
+            replacement.loadUrl(DEFAULT_START_URL)
+            if (isCurrent) {
+                updateStartPageCardVisibility(DEFAULT_START_URL)
+                updateUrlDisplay(DEFAULT_START_URL, forceUpdateText = true)
+            }
+        }
         if (isCurrent) {
-            updateStartPageCardVisibility(DEFAULT_START_URL)
             syncMicroJitterState()
             statusLabel.text = getString(R.string.renderer_crashed_notice)
         }
     }
 
     private fun evaluateVpnState() {
-        sessions.forEach { installSnakeCore(it) }
+        sessions.forEach {
+            if (it.isWebViewAttached) installSnakeCore(it)
+        }
         if (!prefs.vpnKillSwitchEnabled) {
             if (vpnBlockedView.visibility == View.VISIBLE) {
                 vpnBlockedView.visibility = View.GONE
@@ -1186,7 +1308,9 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     fun createNewSession(loadHome: Boolean = true, switchTo: Boolean = true): BrowserSession {
         performHaptic()
         val newWebView = createSessionWebView()
-        val newSession = BrowserSession(webView = newWebView)
+        val newSession = BrowserSession(webView = newWebView).apply {
+            lastActiveAtMs = System.currentTimeMillis()
+        }
         configureWebView(newSession)
         installSnakeCore(newSession)
         applyRuntimePreferencesToSession(newSession)
@@ -1199,16 +1323,20 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                 safeLoadUrl(newSession.lastLoadedHomeUrl)
             }
             statusLabel.text = getString(R.string.status_new_session)
-        } else if (loadHome) {
-            newSession.lastLoadedHomeUrl = prefs.homeUrl
-            newWebView.loadUrl(newSession.lastLoadedHomeUrl)
+        } else {
+            if (loadHome) {
+                newSession.lastLoadedHomeUrl = prefs.homeUrl
+                newWebView.loadUrl(newSession.lastLoadedHomeUrl)
+            }
+            evictLruBackgroundSessionsIfNeeded()
         }
         return newSession
     }
 
     fun switchToSession(target: BrowserSession) {
         if (target !in sessions) return
-        if (target !== activeSession) {
+        val switching = target !== activeSession
+        if (switching) {
             closeFindBar()
             closeReaderMode()
             exitFullscreenVideo()
@@ -1219,10 +1347,19 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
             val outgoing = activeSession
             microJitter.stop()
-            outgoing.webView.id = View.NO_ID
-            swipeRefresh.removeView(outgoing.webView)
+            if (outgoing.isWebViewAttached) {
+                outgoing.webView.id = View.NO_ID
+                swipeRefresh.removeView(outgoing.webView)
+            }
 
             activeSession = target
+        }
+
+        val wasDetached = !target.isWebViewAttached
+        ensureSessionWebViewAttached(target)
+        target.lastActiveAtMs = System.currentTimeMillis()
+
+        if (switching || wasDetached) {
             webView = target.webView
             webView.id = R.id.webView
             if (webView.parent == null) {
@@ -1235,7 +1372,17 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             )
         }
 
-        val currentUrl = webView.url ?: target.currentUrl
+        evictLruBackgroundSessionsIfNeeded()
+
+        val deferredRestore = target.pendingRestoreUrl
+        if (deferredRestore != null) {
+            target.pendingRestoreUrl = null
+            if (deferredRestore != DEFAULT_START_URL) {
+                safeLoadUrl(deferredRestore)
+            }
+        }
+
+        val currentUrl = deferredRestore ?: (if (target.isWebViewAttached) webView.url else null) ?: target.currentUrl
         updateUrlDisplay(currentUrl, forceUpdateText = true)
         progressBar.visibility = View.GONE
         swipeRefresh.isRefreshing = false
@@ -1258,6 +1405,42 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         syncMicroJitterState()
     }
 
+    private fun ensureSessionWebViewAttached(session: BrowserSession) {
+        if (session.isWebViewAttached) return
+        val restoredUrl = session.currentUrl
+        val rebuilt = createSessionWebView()
+        session.webView = rebuilt
+        session.isWebViewAttached = true
+        session.downloadListenerAttached = false
+        configureWebView(session)
+        installSnakeCore(session)
+        applyRuntimePreferencesToSession(session)
+        if (restoredUrl.isNotBlank() && restoredUrl != DEFAULT_START_URL) {
+            if (isPinLocked) {
+                session.pendingRestoreUrl = restoredUrl
+            } else if (prefs.vpnKillSwitchEnabled && !VpnGuard.isVpnActive(this)) {
+                session.pendingVpnUrl = restoredUrl
+                rebuilt.loadUrl(DEFAULT_START_URL)
+            } else {
+                rebuilt.loadUrl(restoredUrl)
+            }
+        }
+    }
+
+    private fun evictLruBackgroundSessionsIfNeeded() {
+        var attachedCount = sessions.count { it.isWebViewAttached }
+        while (attachedCount > MAX_LIVE_TABS) {
+            val victim = sessions
+                .filter { it !== activeSession && it.isWebViewAttached }
+                .minByOrNull { it.lastActiveAtMs }
+                ?: break
+            victim.currentUrl = victim.webView.url?.takeIf { it.isNotBlank() } ?: victim.currentUrl
+            victim.currentTitle = victim.webView.title?.trim()?.takeIf { it.isNotEmpty() } ?: victim.currentTitle
+            destroySessionWebView(victim, clearData = false, deleteProfile = false)
+            attachedCount--
+        }
+    }
+
     fun closeSession(target: BrowserSession) {
         if (target !in sessions) return
         if (sessions.size <= 1) {
@@ -1271,29 +1454,41 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             switchToSession(sessions[nextIdx])
         }
         sessions.remove(target)
-        destroySessionWebView(target)
+        destroySessionWebView(target, clearData = true, deleteProfile = true)
         updateSessionBadge()
         statusLabel.text = getString(R.string.status_closed_session)
     }
 
-    private fun destroySessionWebView(session: BrowserSession, clearData: Boolean = false) {
+    private fun destroySessionWebView(
+        session: BrowserSession,
+        clearData: Boolean = false,
+        deleteProfile: Boolean = false
+    ) {
         clearScriptHandler(session)
         session.downloadListenerAttached = false
-        runCatching {
-            session.webView.stopLoading()
-            // Detach callbacks that capture this Activity so a lingering WebView can't retain it.
-            session.webView.webViewClient = android.webkit.WebViewClient()
-            session.webView.webChromeClient = null
-            session.webView.setDownloadListener(null)
-            session.webView.setFindListener(null)
-            swipeRefresh.removeView(session.webView)
-            if (clearData) {
-                session.webView.clearCache(true)
-                session.webView.clearHistory()
-                session.webView.clearFormData()
-                session.webView.clearSslPreferences()
+        if (session.isWebViewAttached) {
+            session.isWebViewAttached = false
+            runCatching {
+                session.webView.stopLoading()
+                // Detach callbacks that capture this Activity so a lingering WebView can't retain it.
+                session.webView.webViewClient = android.webkit.WebViewClient()
+                session.webView.webChromeClient = null
+                session.webView.setDownloadListener(null)
+                session.webView.setFindListener(null)
+                swipeRefresh.removeView(session.webView)
+                if (clearData) {
+                    session.webView.clearCache(true)
+                    session.webView.clearHistory()
+                    session.webView.clearFormData()
+                    session.webView.clearSslPreferences()
+                }
+                session.webView.destroy()
             }
-            session.webView.destroy()
+        }
+        if (deleteProfile && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+            runCatching {
+                ProfileStore.getInstance().deleteProfile(session.webViewProfileName)
+            }
         }
     }
 
@@ -1470,15 +1665,33 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             sslBypassed = pageSslBypassed,
             blockedHosts = blockedHostsOnPage.toMap(),
             certificate = webView.certificate,
-            scriptProtectionActive = activeSession.scriptHandler != null
+            scriptProtectionActive = activeSession.scriptHandler != null,
+            sessionPresetOverride = activeSession.presetOverride,
+            sessionProfileIdOverride = activeSession.profileIdOverride
         )
-        val sheet = SiteInfoSheet.show(this, prefs, state) { reloadPage ->
-            applyRuntimePreferences()
-            installSnakeCore()
-            if (reloadPage && webView.url != null && webView.url != DEFAULT_START_URL) {
-                webView.reload()
+        val sheet = SiteInfoSheet.show(
+            activity = this,
+            prefs = prefs,
+            state = state,
+            onProfileOrBlocklistChanged = { reloadPage ->
+                applyRuntimePreferences()
+                installSnakeCore()
+                if (reloadPage && webView.url != null && webView.url != DEFAULT_START_URL) {
+                    webView.reload()
+                }
+            },
+            onSessionProfileSelected = { chosenPreset, chosenProfileId ->
+                activeSession.presetOverride = chosenPreset
+                activeSession.profileIdOverride = chosenProfileId
+                applyRuntimePreferencesToSession(activeSession)
+                installSnakeCore(activeSession)
+                syncMicroJitterState()
+                Toast.makeText(this, R.string.session_profile_switched, Toast.LENGTH_SHORT).show()
+                if (webView.url != null && webView.url != DEFAULT_START_URL) {
+                    webView.reload()
+                }
             }
-        }
+        )
         trackDialog(sheet)
     }
 
@@ -1611,7 +1824,13 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         if (wasLocked) {
             if (pendingInitialLoad) {
                 pendingInitialLoad = false
-                loadInitialHomePage()
+                val restoredUrl = pendingRestoreAfterPinUrl
+                pendingRestoreAfterPinUrl = null
+                if (!restoredUrl.isNullOrBlank() && restoredUrl != DEFAULT_START_URL) {
+                    safeLoadUrl(restoredUrl)
+                } else {
+                    loadInitialHomePage()
+                }
             }
             showOnboardingIfNeeded()
         }
@@ -1644,9 +1863,16 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         val extraSessions = sessions.filter { it !== activeSession }
         extraSessions.forEach { extra ->
             sessions.remove(extra)
-            destroySessionWebView(extra, clearData = true)
+            destroySessionWebView(extra, clearData = true, deleteProfile = true)
         }
 
+        downloadHelper.cancelAll()
+        encryptedSessionStore.cryptoEraseAll()
+        ephemeralRestoreStates.clear()
+        pendingRestoreAfterPinUrl = null
+
+        activeSession.presetOverride = null
+        activeSession.profileIdOverride = null
         activeSession.resetSessionState()
         webView.stopLoading()
         webView.clearCache(true)
@@ -1676,6 +1902,15 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             updateStartPageCardVisibility(DEFAULT_START_URL)
         }
 
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+            runCatching {
+                val profile = ProfileStore.getInstance().getProfile(activeSession.webViewProfileName)
+                profile?.cookieManager?.let { pm ->
+                    pm.removeAllCookies(null)
+                    pm.flush()
+                }
+            }
+        }
         val cookieManager = CookieManager.getInstance()
         if (onComplete != null) {
             val finished = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -1734,7 +1969,95 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
     override fun onStop() {
         unregisterVpnNetworkCallback()
+        if (!isChangingConfigurations && !isFinishing) {
+            persistSessionsIfAllowed()
+        }
         super.onStop()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        // Store only an opaque in-memory UUID token (never put URLs into the Binder/Parcel Bundle).
+        val token = UUID.randomUUID().toString()
+        ephemeralRestoreStates[token] = captureSavedSessionState()
+        outState.putString(STATE_RESTORE_TOKEN, token)
+        if (ephemeralRestoreStates.size > 8) {
+            ephemeralRestoreStates.keys.take(ephemeralRestoreStates.size - 8).forEach {
+                ephemeralRestoreStates.remove(it)
+            }
+        }
+        persistSessionsIfAllowed()
+    }
+
+    private fun captureSavedSessionState(): EncryptedSessionStore.SavedSessionState {
+        val tabs = sessions.map { s ->
+            val url = s.pendingRestoreUrl
+                ?: if (s.isWebViewAttached) {
+                    s.webView.url?.takeIf { it.isNotBlank() } ?: s.currentUrl
+                } else {
+                    s.currentUrl
+                }
+            EncryptedSessionStore.SavedTab(
+                id = s.id,
+                url = url.ifBlank { DEFAULT_START_URL },
+                title = s.currentTitle,
+                sessionSeed = s.sessionSeed,
+                presetOverride = s.presetOverride,
+                profileIdOverride = s.profileIdOverride
+            )
+        }
+        val activeIdx = sessions.indexOf(activeSession).coerceAtLeast(0)
+        return EncryptedSessionStore.SavedSessionState(tabs = tabs, activeIndex = activeIdx)
+    }
+
+    private fun persistSessionsIfAllowed() {
+        if (!::encryptedSessionStore.isInitialized) return
+        if (prefs.autoWipeOnExit) {
+            encryptedSessionStore.clearTabs()
+        } else {
+            val state = captureSavedSessionState()
+            encryptedSessionStore.saveTabs(state.tabs, state.activeIndex, autoWipeOnExit = false)
+        }
+    }
+
+    private fun applyRestoredSessionState(state: EncryptedSessionStore.SavedSessionState) {
+        if (state.tabs.isEmpty()) return
+        val first = state.tabs.first()
+        activeSession.sessionSeed = first.sessionSeed
+        activeSession.presetOverride = first.presetOverride
+        activeSession.profileIdOverride = first.profileIdOverride
+        activeSession.currentUrl = first.url
+        activeSession.currentTitle = first.title
+        applyRuntimePreferencesToSession(activeSession)
+        installSnakeCore(activeSession)
+
+        for (i in 1 until state.tabs.size) {
+            val saved = state.tabs[i]
+            val created = createNewSession(loadHome = false, switchTo = false)
+            created.sessionSeed = saved.sessionSeed
+            created.presetOverride = saved.presetOverride
+            created.profileIdOverride = saved.profileIdOverride
+            created.currentUrl = saved.url
+            created.currentTitle = saved.title
+            applyRuntimePreferencesToSession(created)
+            installSnakeCore(created)
+        }
+
+        val targetIdx = state.activeIndex.coerceIn(0, state.tabs.lastIndex)
+        sessions.forEachIndexed { idx, s ->
+            if (idx != targetIdx && s.currentUrl != DEFAULT_START_URL) {
+                s.pendingRestoreUrl = s.currentUrl
+            }
+        }
+        if (targetIdx != 0) {
+            val activeTarget = sessions[targetIdx]
+            activeTarget.pendingRestoreUrl = null
+            switchToSession(activeTarget)
+        } else {
+            updateUrlDisplay(activeSession.currentUrl, forceUpdateText = true)
+            updateStartPageCardVisibility(activeSession.currentUrl)
+        }
+        updateSessionBadge()
     }
 
     private fun registerVpnNetworkCallback() {
@@ -1814,8 +2137,11 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         }
         captureManager.shutdown()
         downloadHelper.shutdown()
+        val deleteProfilesOnDestroy = prefs.autoWipeOnExit && !isChangingConfigurations
         sessions.toList().forEach { session ->
-            destroySessionWebView(session)
+            if (session.isWebViewAttached || deleteProfilesOnDestroy) {
+                destroySessionWebView(session, deleteProfile = deleteProfilesOnDestroy)
+            }
         }
         sessions.clear()
         super.onDestroy()
@@ -1823,6 +2149,10 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
     companion object {
         const val DEFAULT_START_URL = "about:blank"
+        private const val MAX_LIVE_TABS = 4
+        private const val CRASH_LOOP_GUARD_MS = 10_000L
+        private const val STATE_RESTORE_TOKEN = "stealth_snake_restore_token"
+        private val ephemeralRestoreStates = ConcurrentHashMap<String, EncryptedSessionStore.SavedSessionState>()
         private const val FALLBACK_CHROME_MAJOR = 124
         const val UNIFIED_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
