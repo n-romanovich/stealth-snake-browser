@@ -7,6 +7,7 @@ import android.graphics.PorterDuff
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -19,20 +20,30 @@ import android.widget.Button
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import java.text.DateFormat
 import java.util.Date
 import java.util.concurrent.Executors
 
 /**
  * Downloads & Offline Pages hub.
- * Displays recent downloads and saved MHTML pages in Material 3 Expressive cards,
- * and prompts to enable downloads in Settings when disabled.
+ * Displays recent downloads and saved MHTML pages in a [RecyclerView] with Material 3 Expressive
+ * cards, and prompts to enable downloads in Settings when disabled.
  */
 class DownloadsActivity : AppCompatActivity() {
+
+    private sealed class ListItem {
+        data class Header(val title: String, val topDp: Float) : ListItem()
+        data class Empty(val message: String) : ListItem()
+        data class Download(val entry: DownloadHistoryStore.Entry, val dateText: String) : ListItem()
+        data class SavedPage(val page: OfflinePagesManager.SavedPage, val dateText: String) : ListItem()
+    }
 
     private lateinit var prefs: SnakePreferences
     private lateinit var historyStore: DownloadHistoryStore
@@ -48,8 +59,9 @@ class DownloadsActivity : AppCompatActivity() {
     private lateinit var bannerIcon: ImageView
     private lateinit var bannerMsgTv: TextView
     private lateinit var bannerEnableBtn: Button
-    private lateinit var contentList: LinearLayout
     private lateinit var disabledBanner: LinearLayout
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var adapter: DownloadsAdapter
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var loadGeneration: Long = 0L
@@ -117,7 +129,7 @@ class DownloadsActivity : AppCompatActivity() {
             SnakeTheme.attachExpressivePressAnimation(this, scaleDown = 0.95f)
             setOnClickListener {
                 runIoTask {
-                    historyStore.clear()
+                    historyStore.clearWithFiles(this@DownloadsActivity)
                     mainHandler.post {
                         if (!isDestroyed && !isFinishing) renderContent()
                     }
@@ -129,22 +141,25 @@ class DownloadsActivity : AppCompatActivity() {
         headerRow.addView(clearBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (36 * density).toInt()))
         rootLayout.addView(headerRow)
 
-        val scroll = ScrollView(this).apply {
+        disabledBanner = buildDisabledBanner(density).apply {
+            val hMargin = (16 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(hMargin, (4 * density).toInt(), hMargin, (8 * density).toInt())
+            }
+        }
+        rootLayout.addView(disabledBanner)
+
+        adapter = DownloadsAdapter()
+        recyclerView = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@DownloadsActivity)
+            this.adapter = this@DownloadsActivity.adapter
             clipToPadding = false
             setPadding((16 * density).toInt(), (8 * density).toInt(), (16 * density).toInt(), (24 * density).toInt())
         }
-        val scrollBody = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        disabledBanner = buildDisabledBanner(density)
-        scrollBody.addView(disabledBanner)
-
-        contentList = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        scrollBody.addView(contentList)
-        scroll.addView(scrollBody)
-        rootLayout.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        rootLayout.addView(recyclerView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         applyChromeTheme(density)
         setContentView(rootLayout)
@@ -175,6 +190,7 @@ class DownloadsActivity : AppCompatActivity() {
         bannerMsgTv.setTextColor(tokens.textPrimary)
         bannerEnableBtn.setTextColor(tokens.onPrimaryAccent)
         bannerEnableBtn.background = SnakeTheme.pillRippleSurface(tokens.primaryAccent, rippleColor, 20f, density)
+        adapter.notifyDataSetChanged()
     }
 
     private fun buildDisabledBanner(density: Float): LinearLayout {
@@ -272,28 +288,96 @@ class DownloadsActivity : AppCompatActivity() {
         downloads: List<DownloadHistoryStore.Entry>,
         pages: List<OfflinePagesManager.SavedPage>
     ) {
-        val density = resources.displayMetrics.density
-        contentList.removeAllViews()
-
         val fmt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-
-        // Section 1: Recent File Downloads
-        contentList.addView(sectionHeader(getString(R.string.downloads_section_files), density))
-        if (downloads.isEmpty()) {
-            contentList.addView(emptyCard(getString(R.string.downloads_empty_files), density))
-        } else {
-            for (entry in downloads) {
-                contentList.addView(createDownloadCard(entry, fmt.format(Date(entry.timestampMs)), density))
+        val items = buildList {
+            add(ListItem.Header(getString(R.string.downloads_section_files), 4f))
+            if (downloads.isEmpty()) {
+                add(ListItem.Empty(getString(R.string.downloads_empty_files)))
+            } else {
+                for (entry in downloads) {
+                    add(ListItem.Download(entry, fmt.format(Date(entry.timestampMs))))
+                }
+            }
+            add(ListItem.Header(getString(R.string.downloads_section_pages), 16f))
+            if (pages.isEmpty()) {
+                add(ListItem.Empty(getString(R.string.downloads_empty_pages)))
+            } else {
+                for (page in pages) {
+                    add(ListItem.SavedPage(page, fmt.format(Date(page.savedAtMs))))
+                }
             }
         }
+        adapter.submitItems(items)
+        if (Build.FINGERPRINT.equals("robolectric", ignoreCase = true)) {
+            recyclerView.measure(
+                View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.AT_MOST)
+            )
+            recyclerView.layout(0, 0, 1080, recyclerView.measuredHeight.coerceAtLeast(1920))
+        }
+    }
 
-        // Section 2: Saved Offline Pages
-        contentList.addView(sectionHeader(getString(R.string.downloads_section_pages), density, topDp = 16f))
-        if (pages.isEmpty()) {
-            contentList.addView(emptyCard(getString(R.string.downloads_empty_pages), density))
-        } else {
-            for (page in pages) {
-                contentList.addView(createSavedPageCard(page, fmt.format(Date(page.savedAtMs)), density))
+    private fun confirmOpenDownloadedFile(entry: DownloadHistoryStore.Entry) {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.downloads_open_warning_title)
+            .setMessage(getString(R.string.downloads_open_warning_message, entry.fileName))
+            .setPositiveButton(R.string.action_open) { _, _ ->
+                val targetUri = entry.uriString?.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
+                if (targetUri == null) {
+                    Toast.makeText(this, R.string.downloads_open_failed, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(targetUri, entry.mimeType.ifBlank { "application/octet-stream" })
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                runCatching { startActivity(intent) }.onFailure {
+                    Toast.makeText(this, R.string.downloads_open_failed, Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton(R.string.action_cancel, null)
+            .show()
+        SnakeTheme.styleExpressiveDialog(dialog, prefs.themePalette)
+    }
+
+    private class Holder(val slot: LinearLayout) : RecyclerView.ViewHolder(slot)
+
+    private inner class DownloadsAdapter : RecyclerView.Adapter<Holder>() {
+        private var items: List<ListItem> = emptyList()
+
+        fun submitItems(newItems: List<ListItem>) {
+            items = newItems
+            notifyDataSetChanged()
+        }
+
+        override fun getItemCount(): Int = items.size
+
+        override fun getItemViewType(position: Int): Int = when (items[position]) {
+            is ListItem.Header -> 0
+            is ListItem.Empty -> 1
+            is ListItem.Download -> 2
+            is ListItem.SavedPage -> 3
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+            val container = LinearLayout(parent.context).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            }
+            return Holder(container)
+        }
+
+        override fun onBindViewHolder(holder: Holder, position: Int) {
+            val density = resources.displayMetrics.density
+            holder.slot.removeAllViews()
+            when (val item = items[position]) {
+                is ListItem.Header -> holder.slot.addView(sectionHeader(item.title, density, item.topDp))
+                is ListItem.Empty -> holder.slot.addView(emptyCard(item.message, density))
+                is ListItem.Download -> holder.slot.addView(createDownloadCard(item.entry, item.dateText, density))
+                is ListItem.SavedPage -> holder.slot.addView(createSavedPageCard(item.page, item.dateText, density))
             }
         }
     }
@@ -330,8 +414,7 @@ class DownloadsActivity : AppCompatActivity() {
         density: Float
     ): LinearLayout {
         val card = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.VERTICAL
             background = SnakeTheme.roundedSurface(tokens.cardSurface, Color.TRANSPARENT, 18f, density)
             val pad = (16 * density).toInt()
             setPadding(pad, (14 * density).toInt(), pad, (14 * density).toInt())
@@ -341,6 +424,10 @@ class DownloadsActivity : AppCompatActivity() {
             ).apply {
                 bottomMargin = (8 * density).toInt()
             }
+        }
+        val topRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
         val icon = ImageView(this).apply {
             setImageResource(R.drawable.ic_settings_downloads)
@@ -367,15 +454,72 @@ class DownloadsActivity : AppCompatActivity() {
             getString(R.string.downloads_status_failed)
         }
         val metaTv = TextView(this).apply {
-            text = getString(R.string.downloads_item_meta, statusLabel, entry.mimeType, dateText)
+            val baseMeta = getString(R.string.downloads_item_meta, statusLabel, entry.mimeType, dateText)
+            text = if (entry.sizeBytes >= 0L) {
+                "$baseMeta · ${(entry.sizeBytes / 1024L).coerceAtLeast(1L)} KB"
+            } else {
+                baseMeta
+            }
             textSize = 13f
             setTextColor(if (entry.success) tokens.textSecondary else Color.parseColor("#EF4444"))
             setPadding(0, (3 * density).toInt(), 0, 0)
         }
         col.addView(nameTv)
         col.addView(metaTv)
-        card.addView(icon)
-        card.addView(col)
+        topRow.addView(icon)
+        topRow.addView(col)
+        card.addView(topRow)
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, (10 * density).toInt(), 0, 0)
+        }
+        val hPad = (14 * density).toInt()
+        if (entry.success && !entry.uriString.isNullOrBlank()) {
+            val openBtn = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+                text = getString(R.string.action_open)
+                isAllCaps = false
+                textSize = 13f
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                gravity = Gravity.CENTER
+                minHeight = (34 * density).toInt()
+                setTextColor(tokens.onPrimaryAccent)
+                background = SnakeTheme.pillRippleSurface(tokens.primaryAccent, rippleColor, 17f, density)
+                setPadding(hPad, 0, hPad, 0)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    (34 * density).toInt()
+                ).apply {
+                    marginEnd = (8 * density).toInt()
+                }
+                SnakeTheme.attachExpressivePressAnimation(this, scaleDown = 0.96f)
+                setOnClickListener { confirmOpenDownloadedFile(entry) }
+            }
+            actions.addView(openBtn)
+        }
+        val deleteBtn = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+            text = getString(R.string.action_delete)
+            isAllCaps = false
+            textSize = 13f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            gravity = Gravity.CENTER
+            minHeight = (34 * density).toInt()
+            setTextColor(tokens.textSecondary)
+            background = SnakeTheme.outlinedPillRippleSurface(tokens.outlineStroke, rippleColor, 17f, density, tokens.cardSurface)
+            setPadding(hPad, 0, hPad, 0)
+            SnakeTheme.attachExpressivePressAnimation(this, scaleDown = 0.96f)
+            setOnClickListener {
+                runIoTask {
+                    historyStore.deleteWithFile(this@DownloadsActivity, entry.id)
+                    mainHandler.post {
+                        if (!isDestroyed && !isFinishing) renderContent()
+                    }
+                }
+            }
+        }
+        actions.addView(deleteBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (34 * density).toInt()))
+        card.addView(actions)
         return card
     }
 

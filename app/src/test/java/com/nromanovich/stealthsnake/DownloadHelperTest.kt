@@ -26,6 +26,8 @@ class DownloadHelperTest {
     fun `sanitizeFileName strips path traversal and unsafe characters`() {
         assertEquals("etc_passwd", DownloadHelper.sanitizeFileName("../../etc/passwd"))
         assertEquals("report_2026_1_.pdf", DownloadHelper.sanitizeFileName("report 2026(1).pdf"))
+        assertEquals("evilgpj.exe", DownloadHelper.sanitizeFileName("evil\u202Egpj.exe"))
+        assertEquals("safe_doc.txt", DownloadHelper.sanitizeFileName("safe\u200B\u0007 doc.txt"))
         assertTrue(DownloadHelper.sanitizeFileName("...").startsWith("download_"))
         assertEquals(120, DownloadHelper.sanitizeFileName("a".repeat(200)).length)
     }
@@ -156,5 +158,61 @@ class DownloadHelperTest {
             override fun getInetAddress(): InetAddress = InetAddress.getByName("127.0.0.1")
         }
         factory.createSocket(privateSocket, "example.org", 443, true)
+    }
+
+    @Test
+    fun `decodeDataUri parses base64 and percent-encoded payloads and enforces 50MB cap`() {
+        val (mimeB64, bytesB64) = DownloadHelper.decodeDataUri(
+            "data:text/plain;base64,SGVsbG8gU25ha2Uh",
+            null
+        )
+        assertEquals("text/plain", mimeB64)
+        assertEquals("Hello Snake!", bytesB64.toString(Charsets.UTF_8))
+
+        val (mimePct, bytesPct) = DownloadHelper.decodeDataUri(
+            "data:text/csv,a+b%2Cc%20d",
+            null
+        )
+        assertEquals("text/csv", mimePct)
+        assertEquals("a+b,c d", bytesPct.toString(Charsets.UTF_8))
+
+        val oversized = "data:application/octet-stream;base64," + "A".repeat(72 * 1024 * 1024)
+        var threw = false
+        try {
+            DownloadHelper.decodeDataUri(oversized, null)
+        } catch (_: java.io.IOException) {
+            threw = true
+        }
+        assertTrue(threw)
+    }
+
+    @Test
+    @org.robolectric.annotation.Config(sdk = [28])
+    fun `downloadDataUri writes private file with metadata and deleteWithFile removes physical file`() {
+        val exec = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val helper = DownloadHelper(ctx, Handler(Looper.getMainLooper()), executor = exec)
+        var result: Result<String>? = null
+        helper.downloadDataUri(
+            "data:text/plain;base64,U3RlYWx0aFNuYWtl",
+            "attachment; filename=\"note.txt\"",
+            "text/plain"
+        ) { result = it }
+
+        exec.shutdown()
+        assertTrue(exec.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS))
+        ShadowLooper.idleMainLooper()
+
+        assertTrue(result!!.isSuccess)
+        val entries = DownloadHistoryStore(ctx).list()
+        assertEquals(1, entries.size)
+        val entry = entries.first()
+        assertEquals("note.txt", entry.fileName)
+        assertTrue(entry.sizeBytes == "StealthSnake".length.toLong())
+        val backedFile = java.io.File(entry.filePath!!)
+        assertTrue(backedFile.exists())
+
+        assertTrue(DownloadHistoryStore(ctx).deleteWithFile(ctx, entry.id))
+        assertFalse(backedFile.exists())
+        assertTrue(DownloadHistoryStore(ctx).list().isEmpty())
     }
 }

@@ -213,6 +213,43 @@ class PinOfflineReaderAndDownloadsTest {
     }
 
     @Test
+    fun `DownloadsActivity shows Open warning dialog and Delete physically removes recorded file`() {
+        val prefs = SnakePreferences(ctx)
+        prefs.downloadsEnabled = true
+        val dir = File(ctx.filesDir, "downloads").apply { mkdirs() }
+        val file = File(dir, "doc.pdf").apply { writeText("pdf-data") }
+        DownloadHistoryStore(ctx).record(
+            fileName = "doc.pdf",
+            mimeType = "application/pdf",
+            success = true,
+            uriString = "content://media/external/downloads/42",
+            filePath = file.absolutePath,
+            sizeBytes = file.length()
+        )
+
+        val controller = Robolectric.buildActivity(DownloadsActivity::class.java).setup()
+        val activity = controller.get()
+        val root = (activity.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
+
+        assertNotNull(findTextViewContaining(root, "doc.pdf"))
+        ShadowAlertDialog.reset()
+        val openBtn = findButtonWithText(root, ctx.getString(R.string.action_open))!!
+        openBtn.performClick()
+        ShadowLooper.idleMainLooper()
+        val warnDialog = ShadowAlertDialog.getLatestDialog() as? AlertDialog
+        assertNotNull(warnDialog)
+        assertTrue(warnDialog!!.isShowing)
+        warnDialog.dismiss()
+
+        val deleteBtn = findButtonWithText(root, ctx.getString(R.string.action_delete))!!
+        deleteBtn.performClick()
+        ShadowLooper.idleMainLooper()
+        assertFalse(file.exists())
+        assertTrue(DownloadHistoryStore(ctx).list().isEmpty())
+        controller.pause().destroy()
+    }
+
+    @Test
     fun `MainActivity enforces PIN lock overlay on launch and wipes session after 5 failed attempts`() {
         val prefs = SnakePreferences(ctx)
         prefs.onboardingCompleted = true

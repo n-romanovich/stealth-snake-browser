@@ -1,6 +1,7 @@
 package com.nromanovich.stealthsnake
 
 import android.content.Context
+import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -16,7 +17,10 @@ class DownloadHistoryStore(context: Context) {
         val fileName: String,
         val mimeType: String,
         val timestampMs: Long,
-        val success: Boolean
+        val success: Boolean,
+        val uriString: String? = null,
+        val filePath: String? = null,
+        val sizeBytes: Long = -1L
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
             put("id", id)
@@ -24,6 +28,9 @@ class DownloadHistoryStore(context: Context) {
             put("mimeType", mimeType)
             put("timestampMs", timestampMs)
             put("success", success)
+            if (!uriString.isNullOrBlank()) put("uriString", uriString)
+            if (!filePath.isNullOrBlank()) put("filePath", filePath)
+            if (sizeBytes >= 0L) put("sizeBytes", sizeBytes)
         }
 
         companion object {
@@ -36,22 +43,37 @@ class DownloadHistoryStore(context: Context) {
                     fileName = fileName,
                     mimeType = obj.optString("mimeType", "application/octet-stream"),
                     timestampMs = obj.optLong("timestampMs", 0L),
-                    success = obj.optBoolean("success", true)
+                    success = obj.optBoolean("success", true),
+                    uriString = obj.optString("uriString", "").takeIf { it.isNotBlank() },
+                    filePath = obj.optString("filePath", "").takeIf { it.isNotBlank() },
+                    sizeBytes = obj.optLong("sizeBytes", -1L)
                 )
             }
         }
     }
 
-    private val historyFile = File(context.applicationContext.filesDir, HISTORY_FILE_NAME)
+    private val appContext = context.applicationContext
+    private val historyFile = File(appContext.filesDir, HISTORY_FILE_NAME)
 
-    fun record(fileName: String, mimeType: String, success: Boolean, timestampMs: Long = System.currentTimeMillis()): Entry =
+    fun record(
+        fileName: String,
+        mimeType: String,
+        success: Boolean,
+        timestampMs: Long = System.currentTimeMillis(),
+        uriString: String? = null,
+        filePath: String? = null,
+        sizeBytes: Long = -1L
+    ): Entry =
         synchronized(historyLock) {
             val entry = Entry(
                 id = UUID.randomUUID().toString(),
                 fileName = fileName,
                 mimeType = mimeType.ifBlank { "application/octet-stream" },
                 timestampMs = timestampMs,
-                success = success
+                success = success,
+                uriString = uriString?.takeIf { it.isNotBlank() },
+                filePath = filePath?.takeIf { it.isNotBlank() },
+                sizeBytes = sizeBytes
             )
             val updated = (listOf(entry) + list()).take(MAX_ENTRIES)
             save(updated)
@@ -79,9 +101,57 @@ class DownloadHistoryStore(context: Context) {
         true
     }
 
+    fun deleteWithFile(context: Context, id: String): Boolean {
+        val removed = synchronized(historyLock) {
+            val current = list()
+            val target = current.firstOrNull { it.id == id } ?: return false
+            save(current.filterNot { it.id == id })
+            target
+        }
+        deleteBackedFile(context.applicationContext, removed)
+        return true
+    }
+
     fun clear() = synchronized(historyLock) {
         if (historyFile.exists()) {
             historyFile.delete()
+        }
+    }
+
+    fun clearWithFiles(context: Context) {
+        val snapshot = synchronized(historyLock) {
+            val items = list()
+            if (historyFile.exists()) {
+                historyFile.delete()
+            }
+            items
+        }
+        val ctx = context.applicationContext
+        for (entry in snapshot) {
+            deleteBackedFile(ctx, entry)
+        }
+    }
+
+    private fun deleteBackedFile(context: Context, entry: Entry) {
+        val privateDownloadsRoot = runCatching {
+            File(context.filesDir, "downloads").canonicalPath
+        }.getOrNull()
+        entry.filePath?.let { path ->
+            runCatching {
+                val f = File(path)
+                val canonical = f.canonicalPath
+                if (privateDownloadsRoot != null && canonical.startsWith(privateDownloadsRoot + File.separator)) {
+                    f.delete()
+                }
+            }
+        }
+        entry.uriString?.let { uriStr ->
+            runCatching {
+                val uri = Uri.parse(uriStr)
+                if (uri.scheme == "content") {
+                    context.contentResolver.delete(uri, null, null)
+                }
+            }
         }
     }
 
