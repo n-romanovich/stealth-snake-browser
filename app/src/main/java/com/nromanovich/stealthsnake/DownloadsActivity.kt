@@ -90,6 +90,7 @@ class DownloadsActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        SnakeTheme.applyDynamicActivityOverlay(this)
         super.onCreate(savedInstanceState)
         prefs = SnakePreferences(this)
         historyStore = DownloadHistoryStore(this)

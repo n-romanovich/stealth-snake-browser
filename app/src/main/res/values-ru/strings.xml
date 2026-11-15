@@ -28,7 +28,7 @@
     <string name="start_card_title">Пустая страница</string>
     <string name="start_card_body">Введите адрес сверху или выберите домашнюю страницу.</string>
     <string name="start_card_configure">Выбрать стартовую</string>
-    <string name="start_card_dismiss">Скрыть</string>
+    <string name="start_card_dismiss">Закрыть</string>
 
     <!-- Downloads -->
     <string name="download_started">Загрузка %1$s…</string>
@@ -133,7 +133,7 @@
     <string name="search_startpage">Startpage</string>
     <string name="search_brave">Brave Search</string>
     <string name="search_off">Отключён</string>
-    <string name="pref_force_dark">Тёмная тема сайтов</string>
+    <string name="pref_force_dark">Тёмный режим для страниц</string>
     <string name="pref_text_zoom">Масштаб текста</string>
 
     <string name="cat_network">Сеть и блокировка</string>

@@ -253,6 +253,7 @@ object PinDialogHelper {
             setHintTextColor(colors.body)
             background = SnakeTheme.roundedSurface(colors.surfaceContainer, colors.stroke, 12f, density)
             setPadding((16 * density).toInt(), (12 * density).toInt(), (16 * density).toInt(), (12 * density).toInt())
+            SnakeTheme.styleEditTextAccent(this, SnakePreferences(activity).themePalette, activity)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT

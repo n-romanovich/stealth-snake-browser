@@ -64,7 +64,9 @@
                     android:layout_centerVertical="true"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/btn_clear_url"
-                    android:src="@android:drawable/ic_menu_close_clear_cancel"
+                    android:padding="4dp"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/ic_close"
                     android:visibility="gone"
                     app:tint="#9AA0A6" />
 
@@ -174,7 +176,9 @@
                 android:layout_height="32dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/btn_back"
-                android:src="@android:drawable/arrow_up_float"
+                android:padding="4dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_find_prev"
                 app:tint="#E3E3E3" />
 
             <ImageButton
@@ -183,7 +187,9 @@
                 android:layout_height="32dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/btn_forward"
-                android:src="@android:drawable/arrow_down_float"
+                android:padding="4dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_find_next"
                 app:tint="#E3E3E3" />
 
             <ImageButton
@@ -192,7 +198,9 @@
                 android:layout_height="32dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/action_cancel"
-                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:padding="6dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_close"
                 app:tint="#E3E3E3" />
         </LinearLayout>
 

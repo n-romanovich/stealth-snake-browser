@@ -312,10 +312,12 @@ class SettingsActivity : AppCompatActivity() {
     private var builtSearchTemplate: String? = null
     private var builtBlocklistRaw: String? = null
     private val sectionCategoryByKey = mutableMapOf<String, String>()
+    private val sectionTargetViewByKey = mutableMapOf<String, View>()
     private var homeUrlInput: EditText? = null
     private var customSearchInput: EditText? = null
     private var customRulesInput: EditText? = null
     private var activeHighlightAnimator: ValueAnimator? = null
+    private var highlightedDrawableRestore: (() -> Unit)? = null
     private var highlightedView: View? = null
     private val navItems = mutableListOf<TextView>()
     private val sectionViewsByKey = mutableMapOf<String, Pair<TextView, LinearLayout>>()
@@ -329,6 +331,7 @@ class SettingsActivity : AppCompatActivity() {
     private val activeDialogs = mutableListOf<AlertDialog>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        SnakeTheme.applyDynamicActivityOverlay(this)
         super.onCreate(savedInstanceState)
         prefs = SnakePreferences(this)
 
@@ -520,6 +523,8 @@ class SettingsActivity : AppCompatActivity() {
     override fun onDestroy() {
         settleRunnable?.let { contentScroll.removeCallbacks(it) }
         activeHighlightAnimator?.cancel()
+        highlightedDrawableRestore?.invoke()
+        highlightedDrawableRestore = null
         activeDialogs.toList().forEach { runCatching { it.dismiss() } }
         activeDialogs.clear()
         super.onDestroy()
@@ -581,7 +586,7 @@ class SettingsActivity : AppCompatActivity() {
         contentScroll.post {
             if (targetView != null) {
                 val y = computeRelativeTop(targetView, container)
-                contentScroll.smoothScrollTo(0, maxOf(0, y - (16 * density).toInt()))
+                contentScroll.smoothScrollTo(0, maxOf(0, y - (72 * density).toInt()))
                 pulseViewHighlight(targetView, prefs.themePalette)
             } else {
                 contentScroll.scrollTo(0, 0)
@@ -591,6 +596,9 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun closeCategoryToHub() {
         flushTextInputs()
+        activeHighlightAnimator?.cancel()
+        highlightedDrawableRestore?.invoke()
+        highlightedDrawableRestore = null
         activeCategoryId = null
         // Hide the detail scroll immediately before updating the Hub so hidden categories never
         // relayout on screen or bleed through while transitioning back.
@@ -758,11 +766,14 @@ class SettingsActivity : AppCompatActivity() {
         programmaticScrollActive = false
         settledScrollY = -1
         activeHighlightAnimator?.cancel()
+        highlightedDrawableRestore?.invoke()
+        highlightedDrawableRestore = null
         highlightedView = null
         navRailContainer.removeAllViews()
         navItems.clear()
         sectionViewsByKey.clear()
         sectionCategoryByKey.clear()
+        sectionTargetViewByKey.clear()
         categoryContainers.clear()
         categoryTitles.clear()
         searchEntries.clear()
@@ -953,6 +964,8 @@ class SettingsActivity : AppCompatActivity() {
             ) { prefs.homeUrl = it }
             homeUrlInput = homeEt
             registerSearchEntry(getString(R.string.pref_home_url), cat2Title, R.drawable.ic_settings_home, CAT_SEARCH_HOME, homeCard)
+            sectionCategoryByKey[SECTION_SEARCH_HOME] = CAT_SEARCH_HOME
+            sectionTargetViewByKey[SECTION_SEARCH_HOME] = homeCard
 
             lateinit var customSearchCard: View
             val searchChoiceCard = addChoiceCard(
@@ -1295,7 +1308,7 @@ class SettingsActivity : AppCompatActivity() {
             val vpCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_lock_viewport), prefs.lockViewport, getString(R.string.desc_lock_viewport)) { prefs.lockViewport = it }
             val sensorCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_sensor_fallback), prefs.sensorFallback, getString(R.string.desc_sensor_fallback)) { prefs.sensorFallback = it }
             val perfCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_fuzz_perf), prefs.fuzzPerformanceNow, getString(R.string.desc_fuzz_perf)) { prefs.fuzzPerformanceNow = it }
-            registerSearchEntry(getString(R.string.pref_noise_canvas), cat9Title, R.drawable.ic_snake_minimal, CAT_ANTIFP, canvasCard)
+            registerSearchEntry(getString(R.string.pref_noise_canvas), cat9Title, R.drawable.ic_settings_stealth, CAT_ANTIFP, canvasCard)
             registerSearchEntry(getString(R.string.pref_noise_audio), cat9Title, null, CAT_ANTIFP, audioCard)
             registerSearchEntry(getString(R.string.pref_lock_viewport), cat9Title, null, CAT_ANTIFP, vpCard)
             registerSearchEntry(getString(R.string.pref_sensor_fallback), cat9Title, null, CAT_ANTIFP, sensorCard)
@@ -1363,12 +1376,13 @@ class SettingsActivity : AppCompatActivity() {
         buildHubCards(colors, density, profiles)
 
         val targetSectionKey = if (!hasScrolledInitialTarget) intent.getStringExtra(EXTRA_SCROLL_TO_SECTION) else null
-        val targetPair = targetSectionKey?.let { sectionViewsByKey[it] }
-        if (targetPair != null) {
+        val targetCategoryId = targetSectionKey?.let { sectionCategoryByKey[it] }
+        if (targetCategoryId != null && targetCategoryId in categoryContainers) {
             hasScrolledInitialTarget = true
-            val (navItem, section) = targetPair
-            selectNavItem(navItem, section, palette)
-            openCategory(sectionCategoryByKey[targetSectionKey] ?: CAT_DOWNLOADS)
+            sectionViewsByKey[targetSectionKey]?.let { (navItem, section) ->
+                selectNavItem(navItem, section, palette)
+            }
+            openCategory(targetCategoryId, sectionTargetViewByKey[targetSectionKey])
         } else {
             hasScrolledInitialTarget = true
             val currentCat = activeCategoryId
@@ -1491,7 +1505,7 @@ class SettingsActivity : AppCompatActivity() {
             activeShields,
             if (prefs.microJitterEnabled) onShort else offShort
         )
-        addHubCategoryCard(netSnakeGroup, colors, density, getString(R.string.cat_hub_antifp), antiFpSub, R.drawable.ic_snake_minimal, CAT_ANTIFP)
+        addHubCategoryCard(netSnakeGroup, colors, density, getString(R.string.cat_hub_antifp), antiFpSub, R.drawable.ic_settings_stealth, CAT_ANTIFP)
         refreshGroupShapes(netSnakeGroup, colors, density)
 
         // Block 4: System (About & Reset inline in main settings)
@@ -1672,6 +1686,7 @@ class SettingsActivity : AppCompatActivity() {
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             setTextColor(colors.titleText)
             setHintTextColor(colors.subtitleText)
+            SnakeTheme.styleEditTextAccent(this, prefs.themePalette, this@SettingsActivity)
             background = null
             setPadding((6 * density).toInt(), 0, (6 * density).toInt(), 0)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
@@ -1994,32 +2009,60 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun pulseViewHighlight(target: View, palette: ThemePalette) {
-        val browserColors = SnakeTheme.resolveBrowserColors(this, palette)
+        val tokens = SnakeTheme.resolveTokens(palette, this)
         activeHighlightAnimator?.cancel()
+        highlightedDrawableRestore?.invoke()
+        highlightedDrawableRestore = null
         highlightedView = target
-        val originalBg = target.background
-        val startColor = ColorUtils.setAlphaComponent(browserColors.accent, 36)
-        activeHighlightAnimator = ValueAnimator.ofObject(ArgbEvaluator(), startColor, Color.TRANSPARENT).apply {
-            duration = 1200L
+
+        val originalFg = target.foreground
+        val cardShape = (target.background as? RippleDrawable)?.getDrawable(0) as? GradientDrawable
+        val overlay = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            val radii = cardShape?.cornerRadii
+            if (radii != null) {
+                cornerRadii = radii.copyOf()
+            } else {
+                cornerRadius = OUTER_CORNER_DP * resources.displayMetrics.density
+            }
+            setColor(Color.TRANSPARENT)
+        }
+        val highlightRgb = if (tokens.isLight) {
+            ColorUtils.blendARGB(tokens.primaryAccent, Color.WHITE, 0.20f)
+        } else {
+            ColorUtils.blendARGB(Color.WHITE, tokens.primaryAccent, 0.25f)
+        }
+        val peakAlpha = if (tokens.isLight) 56 else 92
+        target.foreground = overlay
+
+        val restore = {
+            if (highlightedView === target || target.foreground === overlay) {
+                target.foreground = originalFg
+            }
+            if (highlightedView === target) {
+                highlightedView = null
+            }
+            highlightedDrawableRestore = null
+        }
+        highlightedDrawableRestore = restore
+
+        activeHighlightAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 900L
             addUpdateListener { animator ->
                 if (target === highlightedView) {
-                    val c = animator.animatedValue as Int
-                    if (originalBg == null) {
-                        target.setBackgroundColor(c)
-                    } else {
-                        target.alpha = 0.82f + 0.18f * (1f - animator.animatedFraction)
-                    }
+                    val t = animator.animatedFraction
+                    val intensity = when {
+                        t < 0.14f -> t / 0.14f
+                        t < 0.36f -> 1f
+                        else -> 1f - ((t - 0.36f) / 0.64f)
+                    }.coerceIn(0f, 1f)
+                    overlay.setColor(ColorUtils.setAlphaComponent(highlightRgb, (peakAlpha * intensity).toInt()))
+                    target.invalidate()
                 }
             }
             addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationCancel(animation: Animator) {
-                    if (originalBg == null) target.setBackgroundColor(Color.TRANSPARENT) else target.alpha = 1f
-                }
-
-                override fun onAnimationEnd(animation: Animator) {
-                    if (originalBg == null) target.setBackgroundColor(Color.TRANSPARENT) else target.alpha = 1f
-                    if (highlightedView === target) highlightedView = null
-                }
+                override fun onAnimationCancel(animation: Animator) = restore()
+                override fun onAnimationEnd(animation: Animator) = restore()
             })
             start()
         }
@@ -2124,6 +2167,7 @@ class SettingsActivity : AppCompatActivity() {
             textSize = 15.5f
             setTextColor(dialogColors.title)
             setHintTextColor(dialogColors.body)
+            SnakeTheme.styleEditTextAccent(this, palette, this@SettingsActivity)
             background = SnakeTheme.roundedSurface(dialogColors.surfaceContainer, dialogColors.stroke, 16f, density)
             setPadding((16 * density).toInt(), (12 * density).toInt(), (16 * density).toInt(), (12 * density).toInt())
         }
@@ -2403,6 +2447,7 @@ class SettingsActivity : AppCompatActivity() {
             textSize = 14.5f
             setTextColor(colors.titleText)
             setHintTextColor(colors.subtitleText)
+            SnakeTheme.styleEditTextAccent(this, prefs.themePalette, this@SettingsActivity)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 setColor(colors.inputFieldBg)
@@ -2569,6 +2614,7 @@ class SettingsActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_SCROLL_TO_SECTION = "extra_scroll_to_section"
         const val SECTION_DOWNLOADS = "section_downloads"
+        const val SECTION_SEARCH_HOME = "section_search_home"
         private const val STATE_ACTIVE_CATEGORY = "state_active_category"
 
         internal const val CAT_PRESETS = "cat_presets"

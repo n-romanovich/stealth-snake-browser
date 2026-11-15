@@ -9,6 +9,7 @@ import android.app.Application
 class SnakeApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        SnakePreferences.applyLocale(SnakePreferences(this).locale)
         PinLockCoordinator.ensureRegistered(this)
     }
 }

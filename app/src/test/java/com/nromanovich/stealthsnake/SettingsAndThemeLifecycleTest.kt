@@ -3,7 +3,9 @@ package com.nromanovich.stealthsnake
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -20,6 +22,7 @@ import androidx.core.widget.NestedScrollView
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -30,6 +33,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowAlertDialog
 import org.robolectric.shadows.ShadowLooper
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -214,6 +218,91 @@ class SettingsAndThemeLifecycleTest {
             .build()
         ViewCompat.dispatchApplyWindowInsets(root, zeroInsets)
         assertEquals(initialBottomPad, container.paddingBottom)
+
+        ctrl.pause().destroy()
+    }
+
+    @Test
+    fun `default locale is English deep-link opens Search and Start page and search highlight brightens without dimming`() {
+        val prefs = SnakePreferences(ctx)
+        assertEquals(SupportedLocale.EN, prefs.locale)
+        prefs.locale = SupportedLocale.RU
+        prefs.resetToDefaults()
+        assertEquals(SupportedLocale.EN, prefs.locale)
+
+        val deepLinkIntent = Intent(ctx, SettingsActivity::class.java).apply {
+            putExtra(SettingsActivity.EXTRA_SCROLL_TO_SECTION, SettingsActivity.SECTION_SEARCH_HOME)
+        }
+        val ctrl = Robolectric.buildActivity(SettingsActivity::class.java, deepLinkIntent).setup()
+        ShadowLooper.idleMainLooper()
+        val activity = ctrl.get()
+        val root = (activity.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
+
+        val hubScroll = collectViews(root) { it is NestedScrollView }.first() as NestedScrollView
+        val contentScroll = collectViews(root) { it is ScrollView }.last() as ScrollView
+        assertEquals(View.GONE, hubScroll.visibility)
+        assertEquals(View.VISIBLE, contentScroll.visibility)
+
+        val homeTitle = collectViews(contentScroll) {
+            it is TextView && it.text?.toString() == ctx.getString(R.string.pref_home_url)
+        }.first()
+        val homeCard = homeTitle.parent.parent as View
+        // Highlight uses foreground overlay without reducing card alpha.
+        assertEquals(1f, homeCard.alpha, 0.001f)
+
+        // Triggering search entry highlights target card with lighter foreground overlay, never alpha dimming.
+        val searchBtn = collectViews(root) {
+            it is ImageButton && it.contentDescription?.toString() == ctx.getString(R.string.settings_search_hint)
+        }.first()
+        searchBtn.performClick()
+        ShadowLooper.idleMainLooper()
+
+        val searchEntryTitle = collectViews(root) {
+            it is TextView && it.text?.toString() == ctx.getString(R.string.pref_force_dark)
+        }.last()
+        val animField = SettingsActivity::class.java.getDeclaredField("activeHighlightAnimator").apply {
+            isAccessible = true
+        }
+        val animBefore = animField.get(activity)
+        (searchEntryTitle.parent.parent as View).performClick()
+        ShadowLooper.idleMainLooper()
+        val animAfterSearch = animField.get(activity) as? android.animation.ValueAnimator
+        assertTrue(
+            "Selecting a search result must trigger a fresh highlight pulse",
+            animAfterSearch != null && animAfterSearch !== animBefore
+        )
+
+        val forceDarkTitle = collectViews(contentScroll) {
+            it is TextView && it.text?.toString() == ctx.getString(R.string.pref_force_dark)
+        }.first()
+        val forceDarkCard = forceDarkTitle.parent.parent as View
+        assertEquals(1f, forceDarkCard.alpha, 0.001f)
+        assertNull("Completed highlight must restore card foreground", forceDarkCard.foreground)
+
+        // Drive highlight overlay deterministically before Choreographer finishes the frame in Robolectric.
+        val pulseMethod = SettingsActivity::class.java.getDeclaredMethod(
+            "pulseViewHighlight",
+            View::class.java,
+            ThemePalette::class.java
+        ).apply { isAccessible = true }
+        pulseMethod.invoke(activity, forceDarkCard, ThemePalette.OBSIDIAN)
+
+        assertEquals(1f, forceDarkCard.alpha, 0.001f)
+        val fg = forceDarkCard.foreground as? GradientDrawable
+        assertNotNull("Highlighted setting card must attach rounded foreground overlay", fg)
+
+        val anim = animField.get(activity) as android.animation.ValueAnimator
+        anim.currentPlayTime = 225L
+        val fgColor = fg!!.color!!.defaultColor
+        val fgAlpha = Color.alpha(fgColor)
+        assertTrue("Expected luminous positive highlight alpha mid-pulse, was $fgAlpha", fgAlpha > 0)
+        val lum = androidx.core.graphics.ColorUtils.calculateLuminance(
+            androidx.core.graphics.ColorUtils.setAlphaComponent(fgColor, 255)
+        )
+        assertTrue("Highlight overlay must use a light luminous tint, was luminance=$lum", lum > 0.45)
+
+        ShadowLooper.idleMainLooper()
+        assertNull("Completed highlight must restore card foreground", forceDarkCard.foreground)
 
         ctrl.pause().destroy()
     }

@@ -32,6 +32,7 @@ class OfflineViewerActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
+        SnakeTheme.applyDynamicActivityOverlay(this)
         super.onCreate(savedInstanceState)
         val palette = SnakeTheme.resolveBrowserColors(this)
         val density = resources.displayMetrics.density

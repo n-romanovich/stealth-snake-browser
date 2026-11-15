@@ -81,6 +81,7 @@ class SiteFixesActivity : AppCompatActivity() {
     private val searchDebounceRunnable = Runnable { renderResults(animateList = false) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        SnakeTheme.applyDynamicActivityOverlay(this)
         super.onCreate(savedInstanceState)
         palette = SnakePreferences(this).themePalette
         themeSignature = SnakeTheme.resolveThemeSignature(this)
@@ -172,7 +173,9 @@ class SiteFixesActivity : AppCompatActivity() {
             setPadding(0, (8 * density).toInt(), 0, (8 * density).toInt())
         }
         clearSearchBtn = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            setImageResource(R.drawable.ic_close)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding((8 * density).toInt(), (8 * density).toInt(), (8 * density).toInt(), (8 * density).toInt())
             background = null
             contentDescription = getString(R.string.fixes_clear_search)
             visibility = View.GONE
@@ -362,6 +365,7 @@ class SiteFixesActivity : AppCompatActivity() {
         searchIcon.setColorFilter(uiColors.bodyText, PorterDuff.Mode.SRC_IN)
         searchInput.setTextColor(uiColors.titleText)
         searchInput.setHintTextColor(uiColors.bodyText)
+        SnakeTheme.styleEditTextAccent(searchInput, palette, this)
         clearSearchBtn.setColorFilter(uiColors.bodyText, PorterDuff.Mode.SRC_IN)
 
         introView.setTextColor(uiColors.bodyText)
@@ -499,7 +503,7 @@ class SiteFixesActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (8 * density).toInt())
         }
         val title = TextView(this).apply {
-            text = SiteFixGuide.highlight(match.title, query, palette.accent)
+            text = SiteFixGuide.highlight(match.title, query, uiColors.accentHeader)
             textSize = 16f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setTextColor(uiColors.titleText)
@@ -544,7 +548,7 @@ class SiteFixesActivity : AppCompatActivity() {
             setPadding(0, 0, 0, (2 * density).toInt())
         })
         fixBox.addView(TextView(this).apply {
-            text = SiteFixGuide.highlight(match.fixPath, query, palette.accent)
+            text = SiteFixGuide.highlight(match.fixPath, query, uiColors.accentHeader)
             textSize = 13.5f
             setTextColor(uiColors.titleText)
         })
@@ -570,7 +574,7 @@ class SiteFixesActivity : AppCompatActivity() {
             setTextColor(labelColor)
         }
         val text = TextView(this).apply {
-            text = SiteFixGuide.highlight(body, query, palette.accent)
+            text = SiteFixGuide.highlight(body, query, uiColors.accentHeader)
             textSize = 13.5f
             setTextColor(bodyColor)
             setPadding(0, (1 * density).toInt(), 0, 0)

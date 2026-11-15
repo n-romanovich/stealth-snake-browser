@@ -30,6 +30,7 @@ import java.util.zip.DeflaterOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -489,6 +490,59 @@ class BrowserUiLifecycleTest {
         )
         dlg.dismiss()
         ShadowLooper.idleMainLooper()
+
+        ctrl.pause().destroy()
+    }
+
+    @Test
+    fun `start configure opens search home section downloads precede find in menu and EditText follows palette`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = SnakePreferences(ctx)
+        prefs.onboardingCompleted = true
+        prefs.themePalette = ThemePalette.AMOLED
+
+        val ctrl = Robolectric.buildActivity(MainActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
+        val activity = ctrl.get()
+
+        // Blank page Dismiss button label & Set home page deep-link target.
+        val dismissBtn = activity.findViewById<android.widget.TextView>(R.id.btnStartDismiss)
+        assertEquals("Dismiss", dismissBtn.text.toString())
+        activity.findViewById<View>(R.id.btnStartConfigure).performClick()
+        val launched = Shadows.shadowOf(activity).nextStartedActivity
+        assertNotNull(launched)
+        assertEquals(SettingsActivity::class.java.name, launched.component?.className)
+        assertEquals(
+            SettingsActivity.SECTION_SEARCH_HOME,
+            launched.getStringExtra(SettingsActivity.EXTRA_SCROLL_TO_SECTION)
+        )
+
+        // Overflow menu puts Downloads directly above Find in page.
+        activity.findViewById<android.widget.ImageButton>(R.id.btnMenu).performClick()
+        ShadowLooper.idleMainLooper()
+        val popup = Shadows.shadowOf(ApplicationProvider.getApplicationContext<android.app.Application>()).latestPopupWindow
+        assertNotNull(popup)
+        val labels = mutableListOf<String>()
+        fun collectText(v: View) {
+            if (v is android.widget.TextView && v.text != null) labels.add(v.text.toString())
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) collectText(v.getChildAt(i))
+            }
+        }
+        collectText(popup!!.contentView)
+        val dlIdx = labels.indexOf(ctx.getString(R.string.btn_downloads))
+        val findIdx = labels.indexOf(ctx.getString(R.string.btn_find_in_page))
+        assertTrue("Downloads and Find in page must exist in menu", dlIdx >= 0 && findIdx >= 0)
+        assertEquals("Downloads must appear directly above Find in page", dlIdx + 1, findIdx)
+        popup.dismiss()
+
+        // Active palette styles urlInput & findInput highlight/cursor cleanly instead of leaving Obsidian orange.
+        val expectedHighlight = androidx.core.graphics.ColorUtils.setAlphaComponent(
+            SnakeTheme.resolveTokens(ThemePalette.AMOLED, ctx).primaryAccent,
+            72
+        )
+        assertEquals(expectedHighlight, activity.findViewById<EditText>(R.id.urlInput).highlightColor)
+        assertEquals(expectedHighlight, activity.findViewById<EditText>(R.id.findInput).highlightColor)
 
         ctrl.pause().destroy()
     }

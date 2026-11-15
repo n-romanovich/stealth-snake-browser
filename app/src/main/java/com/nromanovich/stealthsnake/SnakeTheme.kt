@@ -19,6 +19,7 @@ import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
 import androidx.annotation.ColorRes
 import androidx.annotation.RequiresApi
@@ -26,6 +27,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.WindowCompat
+import com.google.android.material.color.DynamicColors
 
 enum class ThemePalette(
     val key: String,
@@ -152,6 +154,46 @@ object SnakeTheme {
 
     fun isDynamicThemeActive(context: Context): Boolean =
         isDynamicColorAvailable() && SnakePreferences(context.applicationContext).useDynamicTheme
+
+    /** Applies Material You dynamic theme overlay at activity startup when dynamic colors are active. */
+    fun applyDynamicActivityOverlay(activity: Activity) {
+        if (isDynamicThemeActive(activity)) {
+            DynamicColors.applyToActivityIfAvailable(activity)
+        }
+    }
+
+    /** Styles cursor, selection handles, and highlight tint to match the active palette (or Material You). */
+    fun styleEditTextAccent(
+        editText: EditText,
+        palette: ThemePalette,
+        context: Context = editText.context
+    ) {
+        val accent = resolveTokens(palette, context).primaryAccent
+        editText.highlightColor = ColorUtils.setAlphaComponent(accent, 72)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val density = editText.resources.displayMetrics.density
+            editText.textCursorDrawable = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(accent)
+                setSize((2f * density).toInt().coerceAtLeast(2), -1)
+                cornerRadius = density
+            }
+            runCatching {
+                editText.textSelectHandle?.mutate()?.let { handle ->
+                    handle.setTint(accent)
+                    editText.setTextSelectHandle(handle)
+                }
+                editText.textSelectHandleLeft?.mutate()?.let { handle ->
+                    handle.setTint(accent)
+                    editText.setTextSelectHandleLeft(handle)
+                }
+                editText.textSelectHandleRight?.mutate()?.let { handle ->
+                    handle.setTint(accent)
+                    editText.setTextSelectHandleRight(handle)
+                }
+            }
+        }
+    }
 
     fun resolveThemeSignature(context: Context): String {
         val prefs = SnakePreferences(context.applicationContext)

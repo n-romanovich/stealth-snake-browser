@@ -226,6 +226,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         prefs = SnakePreferences(this)
         SnakePreferences.applyLocale(prefs.locale)
         PinLockCoordinator.ensureRegistered(this)
+        SnakeTheme.applyDynamicActivityOverlay(this)
         super.onCreate(savedInstanceState)
 
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
@@ -1024,11 +1025,13 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         urlPillContainer.background = SnakeTheme.roundedSurface(colors.pill, Color.TRANSPARENT, 21f, density)
         urlInput.setTextColor(colors.text)
         urlInput.setHintTextColor(colors.muted)
+        SnakeTheme.styleEditTextAccent(urlInput, palette, this)
         statusLabel.setTextColor(colors.muted)
 
         findInput.background = SnakeTheme.roundedSurface(colors.pill, Color.TRANSPARENT, 17f, density)
         findInput.setTextColor(colors.text)
         findInput.setHintTextColor(colors.muted)
+        SnakeTheme.styleEditTextAccent(findInput, palette, this)
         findCount.setTextColor(colors.muted)
         findViewById<ImageButton>(R.id.btnFindPrev).setColorFilter(colors.text)
         findViewById<ImageButton>(R.id.btnFindNext).setColorFilter(colors.text)
@@ -1217,7 +1220,10 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
         // Start page text actions
         findViewById<TextView>(R.id.btnStartConfigure).setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
+            startActivity(
+                Intent(this, SettingsActivity::class.java)
+                    .putExtra(SettingsActivity.EXTRA_SCROLL_TO_SECTION, SettingsActivity.SECTION_SEARCH_HOME)
+            )
         }
         findViewById<TextView>(R.id.btnStartDismiss).setOnClickListener {
             prefs.startHintDismissed = true
@@ -1301,6 +1307,9 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_share, getString(R.string.menu_share_url), hasPage) {
                 shareCurrentUrl()
             },
+            BrowserUiHelper.MenuEntry(R.drawable.ic_settings_downloads, getString(R.string.btn_downloads), true) {
+                startActivity(Intent(this, DownloadsActivity::class.java))
+            },
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_find, getString(R.string.btn_find_in_page), true) {
                 findBar.visibility = View.VISIBLE
                 findInput.requestFocus()
@@ -1326,9 +1335,6 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_print_pdf, getString(R.string.menu_print_pdf), hasLoadedPage) {
                 printCurrentPage()
-            },
-            BrowserUiHelper.MenuEntry(R.drawable.ic_settings_downloads, getString(R.string.btn_downloads), true) {
-                startActivity(Intent(this, DownloadsActivity::class.java))
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_captures, getString(R.string.btn_captures_viewer), true) {
                 startActivity(Intent(this, CapturesActivity::class.java))
@@ -1606,6 +1612,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             setHintTextColor(colors.body)
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
             isSingleLine = true
+            SnakeTheme.styleEditTextAccent(this, prefs.themePalette, this@MainActivity)
         }
         val passInput = EditText(this).apply {
             hint = getString(R.string.http_auth_password)
@@ -1613,6 +1620,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             setHintTextColor(colors.body)
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             isSingleLine = true
+            SnakeTheme.styleEditTextAccent(this, prefs.themePalette, this@MainActivity)
         }
         container.addView(userInput)
         container.addView(passInput)

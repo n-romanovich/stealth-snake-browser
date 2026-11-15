@@ -53,6 +53,7 @@ class CapturesActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        SnakeTheme.applyDynamicActivityOverlay(this)
         super.onCreate(savedInstanceState)
         captureManager = CaptureManager(this)
         palette = SnakeTheme.resolveBrowserColors(this)

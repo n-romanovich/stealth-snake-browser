@@ -28,7 +28,7 @@
     <string name="start_card_title">Blank page</string>
     <string name="start_card_body">Enter an address above or set a default home page.</string>
     <string name="start_card_configure">Set home page</string>
-    <string name="start_card_dismiss">Hide</string>
+    <string name="start_card_dismiss">Dismiss</string>
 
     <!-- Downloads -->
     <string name="download_started">Downloading %1$s…</string>
@@ -131,7 +131,7 @@
     <string name="search_startpage">Startpage</string>
     <string name="search_brave">Brave Search</string>
     <string name="search_off">Disabled</string>
-    <string name="pref_force_dark">Force dark mode</string>
+    <string name="pref_force_dark">Force dark mode on pages</string>
     <string name="pref_text_zoom">Text scale</string>
 
     <string name="cat_network">Network &amp; Blocking</string>

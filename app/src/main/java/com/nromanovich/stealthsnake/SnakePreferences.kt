@@ -273,7 +273,7 @@ class SnakePreferences(context: Context) {
 
     // Session & UI
     var locale: SupportedLocale
-        get() = SupportedLocale.fromTag(prefs.getString(KEY_LOCALE, SupportedLocale.SYSTEM.tag))
+        get() = SupportedLocale.fromTag(prefs.getString(KEY_LOCALE, SupportedLocale.EN.tag))
         set(value) {
             prefs.edit().putString(KEY_LOCALE, value.tag).apply()
             applyLocale(value)
@@ -541,7 +541,7 @@ class SnakePreferences(context: Context) {
         } else {
             PinLockCoordinator.onPinCleared()
         }
-        applyLocale(SupportedLocale.SYSTEM)
+        applyLocale(SupportedLocale.EN)
     }
 
     /**
