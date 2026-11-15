@@ -6,16 +6,21 @@ import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.Application
+import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuff
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -29,6 +34,7 @@ import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewDatabase
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -36,6 +42,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.annotation.VisibleForTesting
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.graphics.ColorUtils
 import androidx.webkit.Profile
@@ -71,8 +78,10 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
     private val registeredApps = Collections.synchronizedSet(
         Collections.newSetFromMap(WeakHashMap<Application, Boolean>())
     )
+    private val registeredDialogs = WeakHashMap<Activity, MutableSet<Dialog>>()
     private val startedActivityIds = mutableSetOf<Int>()
     private val secondaryLocks = mutableMapOf<Int, SecondaryLockState>()
+    private var latestStartedActivity: java.lang.ref.WeakReference<Activity>? = null
 
     @Volatile
     private var unlockedForSession: Boolean = false
@@ -81,7 +90,37 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
     private var lastBackgroundAtMs: Long = 0L
 
     @Volatile
+    private var pendingTaskResetAfterWipe: Boolean = false
+
+    @Volatile
     private var clockProvider: () -> Long = { SystemClock.elapsedRealtime() }
+
+    /** Registers a dialog owned by [activity] so secondary lock overlays can dismiss it immediately. */
+    fun registerActiveDialog(activity: Activity, dialog: Dialog) {
+        val set = registeredDialogs.getOrPut(activity) {
+            Collections.newSetFromMap(WeakHashMap<Dialog, Boolean>())
+        }
+        set.add(dialog)
+    }
+
+    private fun dismissActiveDialogs(activity: Activity) {
+        val dialogs = registeredDialogs.remove(activity) ?: return
+        for (dlg in dialogs.toList()) {
+            runCatching { if (dlg.isShowing) dlg.dismiss() }
+        }
+    }
+
+    /**
+     * Executes an irreversible panic wipe immediately without marking the session unlocked or
+     * clearing background lock timers — used when an Activity was destroyed or backgrounded
+     * while a 5th failed PIN attempt was evaluating.
+     */
+    fun executeDetachedAutoWipe(context: Context) {
+        val appCtx = context.applicationContext
+        unlockedForSession = false
+        wipeAllSensitiveDataFromSecondary(appCtx)
+        pendingTaskResetAfterWipe = true
+    }
 
     fun ensureRegistered(context: Context) {
         val app = context.applicationContext as? Application ?: return
@@ -92,6 +131,9 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
 
     fun isLocked(prefs: SnakePreferences): Boolean =
         prefs.pinLockEnabled && !unlockedForSession
+
+    fun isActivityStarted(activity: Activity): Boolean =
+        System.identityHashCode(activity) in startedActivityIds
 
     fun markUnlocked() {
         unlockedForSession = true
@@ -112,8 +154,10 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
     fun resetForTests(clock: () -> Long = { SystemClock.elapsedRealtime() }) {
         startedActivityIds.clear()
         secondaryLocks.clear()
+        registeredDialogs.clear()
         unlockedForSession = false
         lastBackgroundAtMs = 0L
+        pendingTaskResetAfterWipe = false
         clockProvider = clock
     }
 
@@ -470,6 +514,10 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
             setPadding(0, (8 * density).toInt(), 0, (28 * density).toInt())
         }
 
+        val screenWidthPx = activity.resources.displayMetrics.widthPixels
+        val keyGap = (12 * density).toInt()
+        val keySize = minOf((82 * density).toInt(), maxOf((62 * density).toInt(), (screenWidthPx - (84 * density).toInt()) / 3))
+
         lateinit var clearKeyTv: AppCompatTextView
         val unlockBtn = MaterialButton(activity).apply {
             text = activity.getString(R.string.pin_unlock)
@@ -495,6 +543,59 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
                 topMargin = (28 * density).toInt()
             }
             SnakeTheme.attachExpressivePressAnimation(this, scaleDown = 0.95f)
+        }
+
+        val wipeResetBtn = MaterialButton(activity).apply {
+            text = activity.getString(R.string.pin_wipe_reset_btn)
+            textSize = 13.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            isAllCaps = false
+            cornerRadius = (20 * density).toInt()
+            elevation = 0f
+            stateListAnimator = null
+            setBackgroundColor(Color.parseColor("#33EF4444"))
+            setTextColor(Color.parseColor("#EF4444"))
+            visibility = View.GONE
+            minHeight = (40 * density).toInt()
+            minimumHeight = (40 * density).toInt()
+            val hPad = (20 * density).toInt()
+            setPadding(hPad, 0, hPad, 0)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = (14 * density).toInt()
+            }
+            setOnClickListener {
+                val confirmDlg = AlertDialog.Builder(activity)
+                    .setTitle(R.string.pin_wipe_reset_confirm_title)
+                    .setMessage(R.string.pin_wipe_reset_confirm_body)
+                    .setPositiveButton(R.string.pin_wipe_reset_btn) { _, _ ->
+                        // Wipe all sensitive browser data BEFORE clearing PIN and unlocking.
+                        if (activity is PinProtectedHost) {
+                            activity.onPinAutoWipeRequested()
+                            PinManager.clearPin(prefs)
+                            markUnlocked()
+                            activity.onPinUnlocked()
+                            Toast.makeText(activity, R.string.pin_removed, Toast.LENGTH_SHORT).show()
+                        } else {
+                            wipeAllSensitiveDataFromSecondary(activity.applicationContext)
+                            PinManager.clearPin(prefs)
+                            markUnlocked()
+                            onUnlocked()
+                            val restartIntent = Intent(activity, MainActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                            }
+                            activity.startActivity(restartIntent)
+                            activity.finish()
+                        }
+                    }
+                    .setNegativeButton(R.string.action_cancel, null)
+                    .create()
+                registerActiveDialog(activity, confirmDlg)
+                confirmDlg.show()
+                SnakeTheme.styleExpressiveDialog(confirmDlg, palette, destructivePositive = true)
+            }
         }
 
         fun syncIndicator() {
@@ -524,13 +625,31 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
                 syncIndicator()
                 val candidate = enteredPin.toString()
                 PinManager.verifyPinAsync(activity, prefs, candidate) { res ->
+                    if (res is PinManager.VerifyResult.TriggerAutoWipe) {
+                        verifying = false
+                        enteredPin.clear()
+                        syncIndicator()
+                        if (activity.isFinishing || activity.isDestroyed || !isActivityStarted(activity)) {
+                            executeDetachedAutoWipe(activity.applicationContext)
+                            return@verifyPinAsync
+                        }
+                        if (activity is PinProtectedHost) {
+                            markUnlocked()
+                        }
+                        hideKeyboard(activity, rootScroll)
+                        onAutoWipe()
+                        return@verifyPinAsync
+                    }
                     if (activity.isFinishing || activity.isDestroyed) return@verifyPinAsync
                     verifying = false
                     when (res) {
                         is PinManager.VerifyResult.Success -> {
-                            markUnlocked()
                             enteredPin.clear()
                             syncIndicator()
+                            if (!isActivityStarted(activity)) {
+                                return@verifyPinAsync
+                            }
+                            markUnlocked()
                             hideKeyboard(activity, rootScroll)
                             onUnlocked()
                         }
@@ -546,21 +665,16 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
                                 duration = 280L
                                 start()
                             }
-                            errorTv.text = if (res.lockoutRemainingMs > 0L) {
-                                activity.getString(R.string.pin_locked_out, ((res.lockoutRemainingMs + 999L) / 1000L).toInt())
-                            } else if (prefs.pinAutoWipeOnFail) {
-                                activity.getString(R.string.pin_wrong, res.remaining)
-                            } else {
-                                activity.getString(R.string.pin_wrong_simple)
+                            errorTv.text = when {
+                                res.keyPermanentlyLost -> activity.getString(R.string.pin_keystore_lost)
+                                res.keystoreError -> activity.getString(R.string.pin_keystore_unavailable)
+                                res.lockoutRemainingMs > 0L -> activity.getString(R.string.pin_locked_out, ((res.lockoutRemainingMs + 999L) / 1000L).toInt())
+                                prefs.pinAutoWipeOnFail -> activity.getString(R.string.pin_wrong, res.remaining)
+                                else -> activity.getString(R.string.pin_wrong_simple)
                             }
+                            wipeResetBtn.visibility = if (res.keyPermanentlyLost) View.VISIBLE else View.GONE
                         }
-                        is PinManager.VerifyResult.TriggerAutoWipe -> {
-                            markUnlocked()
-                            enteredPin.clear()
-                            syncIndicator()
-                            hideKeyboard(activity, rootScroll)
-                            onAutoWipe()
-                        }
+                        is PinManager.VerifyResult.TriggerAutoWipe -> Unit
                     }
                 }
             }
@@ -611,9 +725,6 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
             listOf("7", "8", "9"),
             listOf("DEL", "0", "CLR")
         )
-        val screenWidthPx = activity.resources.displayMetrics.widthPixels
-        val keyGap = (12 * density).toInt()
-        val keySize = minOf((82 * density).toInt(), maxOf((62 * density).toInt(), (screenWidthPx - (84 * density).toInt()) / 3))
 
         val keypadContainer = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
@@ -686,6 +797,7 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
         content.addView(errorTv)
         content.addView(keypadContainer)
         content.addView(unlockBtn)
+        content.addView(wipeResetBtn)
 
         rootScroll.addView(content)
         syncIndicator()
@@ -767,6 +879,25 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
 
     fun enforceLockIfNeeded(activity: Activity) {
         val prefs = SnakePreferences(activity)
+        val hasPendingAutoWipe = prefs.pinLockEnabled && prefs.pinAutoWipeOnFail && prefs.pinAutoWipePending
+        if (hasPendingAutoWipe || pendingTaskResetAfterWipe) {
+            pendingTaskResetAfterWipe = false
+            dismissActiveDialogs(activity)
+            if (activity is PinProtectedHost) {
+                activity.onPinAutoWipeRequested()
+                return
+            }
+            if (hasPendingAutoWipe) {
+                wipeAllSensitiveDataFromSecondary(activity.applicationContext)
+            }
+            Toast.makeText(activity, R.string.pin_wiped, Toast.LENGTH_LONG).show()
+            val restartIntent = Intent(activity, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            }
+            activity.startActivity(restartIntent)
+            activity.finish()
+            return
+        }
         if (!prefs.pinLockEnabled) {
             unlockedForSession = true
             removeLockFromActivity(activity)
@@ -777,6 +908,7 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
             return
         }
         if (activity is PinProtectedHost) {
+            dismissActiveDialogs(activity)
             activity.onPinLockRequired()
             return
         }
@@ -784,6 +916,7 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
     }
 
     private fun attachSecondaryLock(activity: Activity, prefs: SnakePreferences) {
+        dismissActiveDialogs(activity)
         val id = System.identityHashCode(activity)
         if (secondaryLocks.containsKey(id)) return
         val contentRoot = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
@@ -849,6 +982,7 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
         val id = System.identityHashCode(activity)
         val wasInBackground = startedActivityIds.isEmpty()
         startedActivityIds.add(id)
+        latestStartedActivity = java.lang.ref.WeakReference(activity)
         if (wasInBackground && lastBackgroundAtMs > 0L) {
             val prefs = SnakePreferences(activity)
             if (PinManager.shouldLockAfterBackground(prefs.pinLockEnabled, lastBackgroundAtMs, clockProvider())) {
@@ -880,6 +1014,7 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
     override fun onActivityDestroyed(activity: Activity) {
         val id = System.identityHashCode(activity)
         startedActivityIds.remove(id)
+        dismissActiveDialogs(activity)
         secondaryLocks.remove(id)?.let { state ->
             state.backCallback?.isEnabled = false
             state.backCallback?.remove()

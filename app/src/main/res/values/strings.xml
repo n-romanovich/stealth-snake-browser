@@ -396,6 +396,11 @@
     <string name="pin_unlock">Unlock</string>
     <string name="pin_wrong">Incorrect PIN (%1$d attempts left before session wipe)</string>
     <string name="pin_wrong_simple">Incorrect PIN</string>
+    <string name="pin_keystore_unavailable">Hardware security module unavailable. Try again.</string>
+    <string name="pin_keystore_lost">Hardware security key was lost. Wipe browser data to reset PIN lock.</string>
+    <string name="pin_wipe_reset_btn">Wipe data &amp; reset PIN</string>
+    <string name="pin_wipe_reset_confirm_title">Wipe all browser data and reset PIN?</string>
+    <string name="pin_wipe_reset_confirm_body">All sessions, bookmarks, cookies, offline pages, captures, and downloads will be permanently erased, and PIN lock will be disabled.</string>
     <string name="pin_locked_out">Too many attempts. Try again in %1$d s.</string>
     <string name="pin_wiped">Too many failed attempts — session wiped</string>
     <string name="pin_setup_title">Set PIN lock</string>

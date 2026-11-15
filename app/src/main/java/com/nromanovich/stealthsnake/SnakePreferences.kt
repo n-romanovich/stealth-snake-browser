@@ -349,11 +349,33 @@ class SnakePreferences(context: Context) {
         get() = prefs.getString(KEY_PIN_HASH, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_PIN_HASH, value).apply()
 
-    /** Atomically commits salt, hash, lock toggle, and lockout reset in a single disk sync. */
-    fun commitPinCredentials(salt: String, hash: String, enabled: Boolean) {
+    var pinVersion: Int
+        get() = if (prefs.contains(KEY_PIN_VERSION)) {
+            prefs.getInt(KEY_PIN_VERSION, PIN_VERSION_NONE)
+        } else if (pinLockEnabled && pinHash.isNotEmpty()) {
+            PIN_VERSION_V1_PBKDF2
+        } else {
+            PIN_VERSION_NONE
+        }
+        set(value) = prefs.edit().putInt(KEY_PIN_VERSION, value).apply()
+
+    var pinKeyAlias: String
+        get() = prefs.getString(KEY_PIN_KEY_ALIAS, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_PIN_KEY_ALIAS, value).apply()
+
+    /** Atomically commits salt, hash, credential version, Keystore alias, lock toggle, and lockout reset in a single disk sync. */
+    fun commitPinCredentials(
+        salt: String,
+        hash: String,
+        enabled: Boolean,
+        version: Int = if (enabled) PIN_VERSION_V1_PBKDF2 else PIN_VERSION_NONE,
+        keyAlias: String = ""
+    ) {
         prefs.edit()
             .putString(KEY_PIN_SALT, salt)
             .putString(KEY_PIN_HASH, hash)
+            .putInt(KEY_PIN_VERSION, version)
+            .putString(KEY_PIN_KEY_ALIAS, keyAlias)
             .putBoolean(KEY_PIN_LOCK_ENABLED, enabled)
             .putInt(KEY_PIN_FAILED_ATTEMPTS, 0)
             .putLong(KEY_PIN_LOCKOUT_STARTED_AT, 0L)
@@ -376,6 +398,19 @@ class SnakePreferences(context: Context) {
     var pinAutoWipePending: Boolean
         get() = prefs.getBoolean(KEY_PIN_AUTO_WIPE_PENDING, false)
         set(value) { prefs.edit().putBoolean(KEY_PIN_AUTO_WIPE_PENDING, value).commit() }
+
+    /**
+     * Atomically upgrades existing PIN credential metadata (`v1` -> `v2`) on disk without
+     * altering `pinLockEnabled`, lockout counters, or active foreground unlock state.
+     */
+    fun commitMigratedPinCredentials(salt: String, hash: String, version: Int, keyAlias: String) {
+        prefs.edit()
+            .putString(KEY_PIN_SALT, salt)
+            .putString(KEY_PIN_HASH, hash)
+            .putInt(KEY_PIN_VERSION, version)
+            .putString(KEY_PIN_KEY_ALIAS, keyAlias)
+            .commit()
+    }
 
     var pinAutoWipeOnFail: Boolean
         get() = prefs.getBoolean(KEY_PIN_AUTO_WIPE_ON_FAIL, true)
@@ -584,10 +619,14 @@ class SnakePreferences(context: Context) {
     }
 
     fun resetToDefaults(preservePin: Boolean = false) {
+        val oldAliasToDelete: String
         synchronized(PinManager) {
             val keepPin = preservePin && pinLockEnabled
             val savedSalt = if (keepPin) pinSalt else ""
             val savedHash = if (keepPin) pinHash else ""
+            val savedVersion = if (keepPin) pinVersion else PIN_VERSION_NONE
+            val savedKeyAlias = if (keepPin) pinKeyAlias else ""
+            oldAliasToDelete = if (!keepPin) pinKeyAlias else ""
             val savedAutoWipe = if (keepPin) pinAutoWipeOnFail else true
             val savedAttempts = if (keepPin) pinFailedAttempts else 0
             val savedLockoutStart = if (keepPin) pinLockoutStartedAtMs else 0L
@@ -595,7 +634,7 @@ class SnakePreferences(context: Context) {
             val savedAutoWipePending = if (keepPin) pinAutoWipePending else false
 
             // Single atomic SharedPreferences commit avoids losing PIN/lockout keys on crash between
-            // clear() and restore.
+            // clear() and restore, and prevents deleting Keystore keys before prefs flush to disk.
             val editor = prefs.edit()
                 .clear()
                 .putBoolean(KEY_USE_DYNAMIC_THEME, true)
@@ -605,6 +644,8 @@ class SnakePreferences(context: Context) {
                     .putBoolean(KEY_PIN_LOCK_ENABLED, true)
                     .putString(KEY_PIN_SALT, savedSalt)
                     .putString(KEY_PIN_HASH, savedHash)
+                    .putInt(KEY_PIN_VERSION, savedVersion)
+                    .putString(KEY_PIN_KEY_ALIAS, savedKeyAlias)
                     .putBoolean(KEY_PIN_AUTO_WIPE_ON_FAIL, savedAutoWipe)
                     .putInt(KEY_PIN_FAILED_ATTEMPTS, savedAttempts)
                     .putLong(KEY_PIN_LOCKOUT_STARTED_AT, savedLockoutStart)
@@ -615,6 +656,9 @@ class SnakePreferences(context: Context) {
             if (!keepPin) {
                 PinLockCoordinator.onPinCleared()
             }
+        }
+        if (oldAliasToDelete.isNotEmpty()) {
+            PinManager.deleteKeystoreAlias(oldAliasToDelete)
         }
         applyLocale(SupportedLocale.EN)
     }
@@ -834,10 +878,15 @@ class SnakePreferences(context: Context) {
         private const val LEGACY_KEY_VPN_BYPASS_START_CHECK = "vpn_bypass_start_check"
         private const val KEY_SESSION_DIRTY = "session_dirty"
         private const val KEY_BLOCK_SCREENSHOTS = "block_screenshots"
+        const val PIN_VERSION_NONE = 0
+        const val PIN_VERSION_V1_PBKDF2 = 1
+        const val PIN_VERSION_V2_TEE_PEPPER = 2
 
         private const val KEY_PIN_LOCK_ENABLED = "pin_lock_enabled"
         private const val KEY_PIN_SALT = "pin_salt"
         private const val KEY_PIN_HASH = "pin_hash"
+        private const val KEY_PIN_VERSION = "pin_version"
+        private const val KEY_PIN_KEY_ALIAS = "pin_key_alias"
         private const val KEY_PIN_AUTO_WIPE_ON_FAIL = "pin_auto_wipe_on_fail"
         private const val KEY_PIN_AUTO_WIPE_PENDING = "pin_auto_wipe_pending"
         private const val KEY_PIN_FAILED_ATTEMPTS = "pin_failed_attempts"

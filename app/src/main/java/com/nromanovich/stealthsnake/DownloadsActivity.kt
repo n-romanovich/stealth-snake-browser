@@ -352,6 +352,7 @@ class DownloadsActivity : AppCompatActivity() {
             }
             .show()
         activeConfirmDialog = dialog
+        PinLockCoordinator.registerActiveDialog(this, dialog)
         SnakeTheme.styleExpressiveDialog(dialog, prefs.themePalette)
     }
 

@@ -398,6 +398,11 @@
     <string name="pin_unlock">Разблокировать</string>
     <string name="pin_wrong">Неверный PIN (осталось попыток до очистки: %1$d)</string>
     <string name="pin_wrong_simple">Неверный PIN-код</string>
+    <string name="pin_keystore_unavailable">Модуль безопасности устройства недоступен. Повторите попытку.</string>
+    <string name="pin_keystore_lost">Аппаратный ключ безопасности утрачен. Сотрите данные браузера, чтобы сбросить PIN.</string>
+    <string name="pin_wipe_reset_btn">Стереть данные и сбросить PIN</string>
+    <string name="pin_wipe_reset_confirm_title">Стереть все данные и сбросить PIN?</string>
+    <string name="pin_wipe_reset_confirm_body">Все сессии, закладки, cookies, офлайн-страницы, снимки и загрузки будут безвозвратно удалены, а PIN-блокировка отключена.</string>
     <string name="pin_locked_out">Слишком много попыток. Повторите через %1$d с.</string>
     <string name="pin_wiped">Слишком много неверных попыток — сессия очищена</string>
     <string name="pin_setup_title">Установить PIN-код</string>

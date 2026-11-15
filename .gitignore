@@ -1,6 +1,8 @@
-# Gradle & Kotlin caches
+# Gradle, Kotlin & NDK/CMake caches
 .gradle/
 .kotlin/
+.cxx/
+**/.cxx/
 build/
 **/build/
 

@@ -5,18 +5,23 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
 import android.text.TextWatcher
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import androidx.core.graphics.ColorUtils
+import androidx.core.view.ViewCompat
 
 /**
  * Dialogs for setting, changing, and verifying the 4-8 digit browser PIN,
@@ -67,10 +72,17 @@ object PinDialogHelper {
             .setPositiveButton(R.string.action_ok, null)
             .setNegativeButton(R.string.action_cancel, null)
             .create()
+        PinLockCoordinator.registerActiveDialog(activity, dialog)
+
+        var cancelled = false
+        dialog.setOnCancelListener { cancelled = true }
+        dialog.setOnDismissListener { cancelled = true }
 
         dialog.setOnShowListener {
             SnakeTheme.styleExpressiveDialog(dialog, palette)
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+            val okBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            val cancelBtn = dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
+            okBtn?.setOnClickListener {
                 val pin = input.text?.toString().orEmpty().trim()
                 val confirmPin = confirm.text?.toString().orEmpty().trim()
                 when {
@@ -86,14 +98,44 @@ object PinDialogHelper {
                         confirm.setText("")
                     }
                     else -> {
-                        PinManager.setPin(prefs, pin)
-                        PinLockCoordinator.onPinConfigured()
-                        // The user just authenticated by choosing the PIN; don't lock them out of
-                        // the live session with the PIN they just created.
-                        PinLockCoordinator.markUnlocked()
-                        Toast.makeText(activity, R.string.pin_saved, Toast.LENGTH_SHORT).show()
-                        dialog.dismiss()
-                        onPinSaved()
+                        okBtn.isEnabled = false
+                        cancelBtn?.isEnabled = false
+                        input.isEnabled = false
+                        confirm.isEnabled = false
+                        dialog.setCancelable(false)
+                        dialog.setCanceledOnTouchOutside(false)
+                        PinLockCoordinator.ensureRegistered(activity)
+                        PinManager.derivePinAsync(pin) { result ->
+                            if (cancelled || !dialog.isShowing || activity.isFinishing || activity.isDestroyed) {
+                                result.getOrNull()?.let { PinManager.discardDerivedPin(prefs, it) }
+                                return@derivePinAsync
+                            }
+                            if (!PinLockCoordinator.isActivityStarted(activity) || PinLockCoordinator.isLocked(prefs)) {
+                                // Activity moved to background or locked mid-KDF: clean up uncommitted TEE key and abort.
+                                result.getOrNull()?.let { PinManager.discardDerivedPin(prefs, it) }
+                                cancelled = true
+                                runCatching { dialog.dismiss() }
+                                return@derivePinAsync
+                            }
+                            result.onSuccess { derived ->
+                                PinManager.commitDerivedPin(prefs, derived)
+                                // Atomically mark live foreground session unlocked immediately after commit.
+                                PinLockCoordinator.markUnlocked()
+                                Toast.makeText(activity, R.string.pin_saved, Toast.LENGTH_SHORT).show()
+                                cancelled = true
+                                dialog.dismiss()
+                                onPinSaved()
+                            }.onFailure {
+                                okBtn.isEnabled = true
+                                cancelBtn?.isEnabled = true
+                                input.isEnabled = true
+                                confirm.isEnabled = true
+                                dialog.setCancelable(true)
+                                dialog.setCanceledOnTouchOutside(true)
+                                errorTv.text = activity.getString(R.string.pin_setup_error)
+                                errorTv.visibility = View.VISIBLE
+                            }
+                        }
                     }
                 }
             }
@@ -136,49 +178,76 @@ object PinDialogHelper {
             .setPositiveButton(R.string.action_ok, null)
             .setNegativeButton(R.string.action_cancel, null)
             .create()
+        PinLockCoordinator.registerActiveDialog(activity, dialog)
+
+        var cancelled = false
+        dialog.setOnCancelListener { cancelled = true }
+        dialog.setOnDismissListener { cancelled = true }
 
         dialog.setOnShowListener {
             SnakeTheme.styleExpressiveDialog(dialog, palette)
             val okBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            val cancelBtn = dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
             okBtn?.setOnClickListener {
                 okBtn.isEnabled = false
+                cancelBtn?.isEnabled = false
                 input.isEnabled = false
+                dialog.setCancelable(false)
+                dialog.setCanceledOnTouchOutside(false)
+                PinLockCoordinator.ensureRegistered(activity)
                 val candidate = input.text?.toString().orEmpty().trim()
                 PinManager.verifyPinAsync(activity, prefs, candidate) { res ->
+                    if (res is PinManager.VerifyResult.TriggerAutoWipe) {
+                        cancelled = true
+                        runCatching { dialog.dismiss() }
+                        if (activity.isFinishing || activity.isDestroyed || !PinLockCoordinator.isActivityStarted(activity)) {
+                            PinLockCoordinator.executeDetachedAutoWipe(activity.applicationContext)
+                            return@verifyPinAsync
+                        }
+                        PinLockCoordinator.wipeAllSensitiveDataFromSecondary(activity)
+                        Toast.makeText(activity, R.string.pin_wiped, Toast.LENGTH_LONG).show()
+                        // Restart the task so live MainActivity tabs/WebViews are destroyed too
+                        // (mirrors the overlay auto-wipe path) instead of returning to them unlocked.
+                        activity.startActivity(
+                            Intent(activity, MainActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                            }
+                        )
+                        activity.finish()
+                        return@verifyPinAsync
+                    }
                     if (activity.isFinishing || activity.isDestroyed) return@verifyPinAsync
                     when (res) {
                         is PinManager.VerifyResult.Success -> {
+                            if (cancelled || !dialog.isShowing || !PinLockCoordinator.isActivityStarted(activity) || PinLockCoordinator.isLocked(prefs)) {
+                                cancelled = true
+                                runCatching { dialog.dismiss() }
+                                return@verifyPinAsync
+                            }
                             PinLockCoordinator.markUnlocked()
+                            cancelled = true
                             dialog.dismiss()
                             onVerified()
                         }
                         is PinManager.VerifyResult.Failed -> {
+                            if (cancelled || !dialog.isShowing) return@verifyPinAsync
                             okBtn.isEnabled = true
+                            cancelBtn?.isEnabled = true
                             input.isEnabled = true
+                            dialog.setCancelable(true)
+                            dialog.setCanceledOnTouchOutside(true)
                             input.setText("")
-                            errorTv.text = if (res.lockoutRemainingMs > 0L) {
-                                activity.getString(R.string.pin_locked_out, ((res.lockoutRemainingMs + 999L) / 1000L).toInt())
-                            } else if (prefs.pinAutoWipeOnFail) {
-                                activity.getString(R.string.pin_wrong, res.remaining)
-                            } else {
-                                activity.getString(R.string.pin_wrong_simple)
+                            errorTv.text = when {
+                                res.keyPermanentlyLost -> activity.getString(R.string.pin_keystore_lost)
+                                res.keystoreError -> activity.getString(R.string.pin_keystore_unavailable)
+                                res.lockoutRemainingMs > 0L -> activity.getString(R.string.pin_locked_out, ((res.lockoutRemainingMs + 999L) / 1000L).toInt())
+                                prefs.pinAutoWipeOnFail -> activity.getString(R.string.pin_wrong, res.remaining)
+                                else -> activity.getString(R.string.pin_wrong_simple)
                             }
                             errorTv.visibility = View.VISIBLE
                             shakeView(input, density)
                         }
-                        is PinManager.VerifyResult.TriggerAutoWipe -> {
-                            dialog.dismiss()
-                            PinLockCoordinator.wipeAllSensitiveDataFromSecondary(activity)
-                            Toast.makeText(activity, R.string.pin_wiped, Toast.LENGTH_LONG).show()
-                            // Restart the task so live MainActivity tabs/WebViews are destroyed too
-                            // (mirrors the overlay auto-wipe path) instead of returning to them unlocked.
-                            activity.startActivity(
-                                Intent(activity, MainActivity::class.java).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                                }
-                            )
-                            activity.finish()
-                        }
+                        is PinManager.VerifyResult.TriggerAutoWipe -> Unit
                     }
                 }
             }

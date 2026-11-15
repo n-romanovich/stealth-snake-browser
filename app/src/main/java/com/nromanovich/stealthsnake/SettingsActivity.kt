@@ -573,6 +573,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun trackDialog(dialog: AlertDialog): AlertDialog {
         activeDialogs.removeAll { !it.isShowing }
         activeDialogs.add(dialog)
+        PinLockCoordinator.registerActiveDialog(this, dialog)
         return dialog
     }
 
