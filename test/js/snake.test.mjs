@@ -1100,3 +1100,146 @@ test('Element.prototype.append and innerHTML synchronously patch same-origin ifr
   assert.equal(r.tz2, 0);
   assert.equal(r.marked2, true);
 });
+
+test('imeToken channel exposes zero globals, ignores nested frames, resists tampering, and covers all input modes', async () => {
+  const token = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  const baseline = await snake(SEED_A);
+  const withIme = await open(buildScript(SEED_A, readBlocklistRules(), undefined, { imeToken: token }));
+
+  const baseKeys = await baseline.eval(`Reflect.ownKeys(window).filter((k) => typeof k === 'string').join(',')`);
+  const imeKeys = await withIme.eval(`Reflect.ownKeys(window).filter((k) => typeof k === 'string').join(',')`);
+  assert.equal(imeKeys, baseKeys);
+
+  const basicCheck = JSON.parse(await withIme.eval(`(() => {
+    let badStrThrew = false;
+    try { Function.prototype.toString.call('wrong_token'); } catch (e) { badStrThrew = e instanceof TypeError; }
+    let numThrew = false;
+    try { Function.prototype.toString.call(123); } catch (e) { numThrew = e instanceof TypeError; }
+
+    const f = document.createElement('iframe');
+    document.body.appendChild(f);
+    let childThrew = false;
+    try { f.contentWindow.Function.prototype.toString.call('${token}'); } catch (e) { childThrew = e instanceof f.contentWindow.TypeError; }
+    f.remove();
+
+    const noneRes = JSON.parse(Function.prototype.toString.call('${token}'));
+    return JSON.stringify({ badStrThrew, numThrew, childThrew, noneRes });
+  })()`));
+  assert.equal(basicCheck.badStrThrew, true);
+  assert.equal(basicCheck.numThrew, true);
+  assert.equal(basicCheck.childThrew, true);
+  assert.equal(basicCheck.noneRes.kind, 'none');
+
+  const scenarios = JSON.parse(await withIme.eval(`(() => {
+    const realStringify = JSON.stringify;
+    const probe = () => JSON.parse(Function.prototype.toString.call('${token}'));
+
+    // 1. Compact pill expansion (Gemini pattern: 24px editor inside 80px fieldset near bottom)
+    const pill = document.createElement('fieldset');
+    pill.style.cssText = 'position:fixed;left:12px;right:12px;bottom:16px;height:80px;margin:0;padding:12px;box-sizing:border-box;border:0;';
+    const ce = document.createElement('div');
+    ce.contentEditable = 'true';
+    ce.setAttribute('role', 'textbox');
+    ce.style.cssText = 'height:24px;width:100%;';
+    ce.textContent = 'hi';
+    pill.appendChild(ce);
+    document.body.appendChild(pill);
+    ce.focus();
+    const pillRes = probe();
+
+    // 2. Tamper page APIs and confirm probe still returns real pill geometry
+    Element.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 1, 1);
+    Object.defineProperty(document, 'activeElement', { get: () => null, configurable: true });
+    window.getComputedStyle = () => ({ visibility: 'hidden', display: 'none', opacity: '0' });
+    JSON.stringify = () => '{"tampered":true}';
+    Object.prototype.toJSON = () => ({ polluted: true });
+    const tamperedRes = probe();
+    delete Object.prototype.toJSON;
+
+    // 3. Top input
+    const topInput = document.createElement('input');
+    topInput.style.cssText = 'position:fixed;top:12px;left:12px;width:200px;height:40px;';
+    document.body.appendChild(topInput);
+    topInput.focus();
+    const topRes = probe();
+
+    // 4. Hidden 1x1 trap
+    const trap = document.createElement('textarea');
+    trap.style.cssText = 'position:fixed;top:10px;left:10px;width:1px;height:1px;opacity:0;';
+    document.body.appendChild(trap);
+    trap.focus();
+    const trapRes = probe();
+
+    // 5. Tall contenteditable with selection caret inside
+    const tall = document.createElement('div');
+    tall.contentEditable = 'true';
+    tall.style.cssText = 'position:fixed;top:100px;left:12px;width:260px;height:300px;';
+    tall.innerHTML = 'line1<br>line2';
+    document.body.appendChild(tall);
+    tall.focus();
+    const sel = window.getSelection();
+    const rng = document.createRange();
+    rng.setStart(tall.lastChild, 2);
+    rng.setEnd(tall.lastChild, 4);
+    sel.removeAllRanges();
+    sel.addRange(rng);
+    const caretRes = probe();
+
+    // 6. Shadow DOM composer
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;left:16px;right:16px;bottom:20px;height:70px;width:300px;padding:10px;box-sizing:border-box;';
+    document.body.appendChild(host);
+    const sr = host.attachShadow({ mode: 'open' });
+    const shInput = document.createElement('textarea');
+    shInput.style.cssText = 'width:100%;height:30px;';
+    sr.appendChild(shInput);
+    shInput.focus();
+    const shadowRes = probe();
+
+    // 7. Same-origin iframe input accumulates iframe top offset
+    const ifr = document.createElement('iframe');
+    ifr.style.cssText = 'position:fixed;top:250px;left:10px;width:280px;height:180px;border:0;';
+    document.body.appendChild(ifr);
+    const iDoc = ifr.contentDocument;
+    const iInput = iDoc.createElement('input');
+    iInput.style.cssText = 'position:fixed;top:100px;left:10px;width:200px;height:36px;';
+    iDoc.body.style.margin = '0';
+    iDoc.body.appendChild(iInput);
+    iInput.focus();
+    const iframeRes = probe();
+
+    // 8. Offscreen input
+    const far = document.createElement('input');
+    far.style.cssText = 'position:absolute;top:5000px;left:10px;width:200px;height:40px;';
+    document.body.appendChild(far);
+    far.focus({ preventScroll: true });
+    const offscreenRes = probe();
+
+    // 9. Send button blurs editable -> kind none
+    const btn = document.createElement('button');
+    btn.textContent = 'Send';
+    document.body.appendChild(btn);
+    btn.focus();
+    const buttonRes = probe();
+
+    return realStringify({
+      pillRes, tamperedRes, topRes, trapRes, caretRes, shadowRes, iframeRes, offscreenRes, buttonRes,
+    });
+  })()`));
+
+  assert.equal(scenarios.pillRes.kind, 'input');
+  assert.ok(scenarios.pillRes.bottom >= scenarios.pillRes.vh - 20, `expected pill bottom near vh, got ${JSON.stringify(scenarios.pillRes)}`);
+  assert.deepEqual(scenarios.tamperedRes, scenarios.pillRes);
+  assert.equal(scenarios.topRes.kind, 'input');
+  assert.ok(scenarios.topRes.top <= 20 && scenarios.topRes.bottom <= 65);
+  assert.equal(scenarios.trapRes.kind, 'hidden_tiny');
+  assert.equal(scenarios.caretRes.kind, 'caret');
+  assert.ok(scenarios.caretRes.containerBottom - scenarios.caretRes.containerTop >= 290);
+  assert.ok(scenarios.caretRes.bottom < scenarios.caretRes.containerBottom);
+  assert.equal(scenarios.shadowRes.kind, 'input');
+  assert.ok(scenarios.shadowRes.bottom >= scenarios.shadowRes.vh - 25);
+  assert.equal(scenarios.iframeRes.kind, 'input');
+  assert.ok(scenarios.iframeRes.top >= 345 && scenarios.iframeRes.top <= 360, `expected iframe top ~350, got ${scenarios.iframeRes.top}`);
+  assert.equal(scenarios.offscreenRes.kind, 'offscreen');
+  assert.equal(scenarios.buttonRes.kind, 'none');
+});

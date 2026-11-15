@@ -145,6 +145,7 @@ class MainActivityTest {
     fun `settings compatibility shows warning dialog without checkmark and guide opens`() {
         ShadowAlertDialog.reset()
         val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
         val activity = controller.get()
         val prefs = SnakePreferences(activity)
         prefs.applyPreset(ProtectionPreset.MAX_STEALTH)
@@ -389,6 +390,7 @@ class MainActivityTest {
         assertEquals("Emerald Splash", ctx.getString(R.string.theme_emerald))
 
         val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
         val activity = controller.get()
         val root = (activity.findViewById<View>(android.R.id.content) as android.view.ViewGroup).getChildAt(0)
         val presetsNav = findTextViewWithText(root, ctx.getString(R.string.nav_presets))!!

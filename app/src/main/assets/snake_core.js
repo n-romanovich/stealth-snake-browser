@@ -82,6 +82,9 @@
     const URLC = G.URL;
     const DeviceMotionEventC = G.DeviceMotionEvent;
     const DeviceOrientationEventC = G.DeviceOrientationEvent;
+    const IME_TOKEN = cfg && typeof cfg.imeToken === 'string' && cfg.imeToken.length >= 16 ? cfg.imeToken : '';
+    let isTopFrame = false;
+    try { isTopFrame = G.top === G; } catch (e) { /* cross-origin top: treat as nested frame */ }
 
     // Install exactly once per realm (the iframe fallback may race the native injection).
     // The marker must be shared between the native injection and the iframe fallback, so it lives in
@@ -140,8 +143,238 @@
       defineProperty(fn, 'length', { value: length });
     }
 
+    let readImeTargetJson = null;
+    if (IME_TOKEN && isTopFrame) {
+      const getterOf = (proto, prop) => {
+        for (let p = proto; p; p = getProto(p)) {
+          const d = gOPD(p, prop);
+          if (d && typeof d.get === 'function') return d.get;
+        }
+        return null;
+      };
+      const ElemC0 = G.Element || Element;
+      const ElemP0 = ElemC0 && ElemC0.prototype;
+      const NodeC0 = G.Node || Node;
+      const NodeP0 = NodeC0 && NodeC0.prototype;
+      const HtmlElemC0 = G.HTMLElement || HTMLElement;
+      const HtmlElemP0 = HtmlElemC0 && HtmlElemC0.prototype;
+      const InputC0 = G.HTMLInputElement || HTMLInputElement;
+      const InputP0 = InputC0 && InputC0.prototype;
+      const IFrameC0 = G.HTMLIFrameElement || HTMLIFrameElement;
+      const IFrameP0 = IFrameC0 && IFrameC0.prototype;
+      const ShadowC0 = G.ShadowRoot || (typeof ShadowRoot === 'function' ? ShadowRoot : null);
+      const ShadowP0 = ShadowC0 && ShadowC0.prototype;
+      const RangeC0 = G.Range || Range;
+      const RangeP0 = RangeC0 && RangeC0.prototype;
+      const SelC0 = G.Selection || (typeof Selection === 'function' ? Selection : null);
+      const SelP0 = SelC0 && SelC0.prototype;
+
+      const origElemGetRect = ElemP0 && ElemP0.getBoundingClientRect;
+      const origElemGetAttr = ElemP0 && ElemP0.getAttribute;
+      const origElemTagNameGet = getterOf(ElemP0, 'tagName');
+      const origElemShadowRootGet = getterOf(ElemP0, 'shadowRoot');
+      const origNodeGetRootNode = NodeP0 && NodeP0.getRootNode;
+      const origNodeParentElemGet = getterOf(NodeP0, 'parentElement');
+      const origIsContentEditableGet = getterOf(HtmlElemP0, 'isContentEditable');
+      const origInputTypeGet = getterOf(InputP0, 'type');
+      const origIframeContentDocGet = getterOf(IFrameP0, 'contentDocument');
+      const origShadowActiveElemGet = getterOf(ShadowP0, 'activeElement');
+      const origShadowHostGet = getterOf(ShadowP0, 'host');
+      const origDocActiveElemGet = getterOf(DocP, 'activeElement');
+      const origRangeGetRect = RangeP0 && RangeP0.getBoundingClientRect;
+      const origSelRangeCountGet = getterOf(SelP0, 'rangeCount');
+      const origSelGetRangeAt = SelP0 && SelP0.getRangeAt;
+      const origGetComputedStyle = G.getComputedStyle;
+      const origGetSelection = G.getSelection;
+      const origDocGetSelection = DocP && DocP.getSelection;
+      const origInnerHeightDesc = gOPD(G, 'innerHeight');
+      const origInnerHeightGet = origInnerHeightDesc && origInnerHeightDesc.get;
+      const origJsonStringify = (G.JSON || JSON).stringify;
+      const NON_TEXT_INPUT_TYPES = new Set([
+        'button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image', 'color', 'range', 'hidden',
+      ]);
+      const EDITABLE_ROLES = new Set(['textbox', 'searchbox', 'combobox']);
+      const PILL_TAGS = new Set(['FIELDSET', 'FORM', 'DIV', 'SECTION', 'FOOTER']);
+
+      const imeJson = (fields) => {
+        const out = O.create(null);
+        for (const k in fields) {
+          if (hasOwn.call(fields, k)) out[k] = fields[k];
+        }
+        return origJsonStringify(out);
+      };
+      const safeTagName = (el) => {
+        if (!el || !origElemTagNameGet) return '';
+        try { return String(apply(origElemTagNameGet, el, [])).toUpperCase(); } catch (e) { return ''; }
+      };
+      const safeRect = (el) => {
+        if (!el || !origElemGetRect) return null;
+        try { return apply(origElemGetRect, el, []); } catch (e) { return null; }
+      };
+      const safeViewportH = () => {
+        if (origInnerHeightGet) {
+          try { return round(apply(origInnerHeightGet, G, [])); } catch (e) {}
+        }
+        return round(G.innerHeight || 0);
+      };
+      const isEditableEl = (el) => {
+        if (!el) return false;
+        const tag = safeTagName(el);
+        if (tag === 'TEXTAREA') return true;
+        if (tag === 'INPUT') {
+          let t = 'text';
+          if (origInputTypeGet) {
+            try { t = String(apply(origInputTypeGet, el, [])).toLowerCase(); } catch (e) {}
+          }
+          return !NON_TEXT_INPUT_TYPES.has(t);
+        }
+        if (origIsContentEditableGet) {
+          try { if (apply(origIsContentEditableGet, el, [])) return true; } catch (e) {}
+        }
+        if (origElemGetAttr) {
+          try {
+            const role = String(apply(origElemGetAttr, el, ['role']) || '').toLowerCase();
+            if (EDITABLE_ROLES.has(role)) return true;
+          } catch (e) {}
+        }
+        return false;
+      };
+      const stepParentAcrossShadow = (el) => {
+        if (!el) return null;
+        try {
+          const p = origNodeParentElemGet ? apply(origNodeParentElemGet, el, []) : null;
+          if (p) return p;
+          if (origNodeGetRootNode && origShadowHostGet) {
+            const root = apply(origNodeGetRootNode, el, []);
+            if (root && root !== el) return apply(origShadowHostGet, root, []);
+          }
+        } catch (e) {}
+        return null;
+      };
+
+      readImeTargetJson = () => {
+        const vh = safeViewportH();
+        try {
+          let doc = G.document;
+          let el = null;
+          let oy = 0;
+          for (let depth = 0; depth < 8 && doc; depth++) {
+            el = origDocActiveElemGet ? apply(origDocActiveElemGet, doc, []) : null;
+            for (let sDepth = 0; sDepth < 8 && el && origElemShadowRootGet && origShadowActiveElemGet; sDepth++) {
+              let sr = null;
+              try { sr = apply(origElemShadowRootGet, el, []); } catch (e) { sr = null; }
+              if (!sr) break;
+              let innerEl = null;
+              try { innerEl = apply(origShadowActiveElemGet, sr, []); } catch (e) { innerEl = null; }
+              if (!innerEl || innerEl === el) break;
+              el = innerEl;
+            }
+            if (!el || safeTagName(el) !== 'IFRAME') break;
+            const fr = safeRect(el);
+            let innerDoc = null;
+            if (origIframeContentDocGet) {
+              try { innerDoc = apply(origIframeContentDocGet, el, []); } catch (e) { innerDoc = null; }
+            }
+            if (!innerDoc) {
+              if (!fr || fr.width < 16 || fr.height < 12) return imeJson({ kind: 'hidden_tiny', vh });
+              const fTop = oy + fr.top;
+              const fBottom = oy + fr.bottom;
+              if (fBottom <= 0 || fTop >= vh) return imeJson({ kind: 'offscreen', vh });
+              return imeJson({
+                kind: fr.height <= 220 ? 'iframe' : 'tall',
+                top: round(fTop),
+                bottom: round(fBottom),
+                vh,
+              });
+            }
+            if (fr) oy += fr.top;
+            doc = innerDoc;
+          }
+
+          if (!isEditableEl(el)) return imeJson({ kind: 'none', vh });
+          const r = safeRect(el);
+          let hiddenByStyle = false;
+          if (origGetComputedStyle) {
+            try {
+              const cs = apply(origGetComputedStyle, G, [el]);
+              if (cs && (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0')) {
+                hiddenByStyle = true;
+              }
+            } catch (e) {}
+          }
+          if (hiddenByStyle || !r || r.width < 16 || r.height < 12) {
+            return imeJson({ kind: 'hidden_tiny', vh });
+          }
+
+          const elTop = oy + r.top;
+          const elBottom = oy + r.bottom;
+          if (elBottom <= 0 || elTop >= vh) return imeJson({ kind: 'offscreen', vh });
+
+          if (r.height > 120) {
+            if (origSelRangeCountGet && origSelGetRangeAt && origRangeGetRect) {
+              try {
+                const sel = origDocGetSelection
+                  ? apply(origDocGetSelection, doc, [])
+                  : (origGetSelection ? apply(origGetSelection, G, []) : null);
+                if (sel && apply(origSelRangeCountGet, sel, []) > 0) {
+                  const range = apply(origSelGetRangeAt, sel, [0]);
+                  const cr = range ? apply(origRangeGetRect, range, []) : null;
+                  if (cr && !(cr.top === 0 && cr.bottom === 0 && cr.height === 0)) {
+                    const cTop = oy + cr.top;
+                    const cBottom = oy + cr.bottom;
+                    if (cBottom > 0 && cTop < vh) {
+                      return imeJson({
+                        kind: 'caret',
+                        top: round(cTop),
+                        bottom: round(cBottom),
+                        containerTop: round(elTop),
+                        containerBottom: round(elBottom),
+                        vh,
+                      });
+                    }
+                  }
+                }
+              } catch (e) {}
+            }
+            return imeJson({ kind: 'tall', top: round(elTop), bottom: round(elBottom), vh });
+          }
+
+          let bestTop = elTop;
+          let bestBottom = elBottom;
+          let cur = stepParentAcrossShadow(el);
+          for (let pDepth = 0; pDepth < 4 && cur; pDepth++) {
+            if (PILL_TAGS.has(safeTagName(cur))) {
+              const pr = safeRect(cur);
+              if (pr) {
+                const pTop = oy + pr.top;
+                const pBottom = oy + pr.bottom;
+                if (
+                  pr.height <= 110 &&
+                  pr.width >= 150 &&
+                  pTop <= elTop + 4 &&
+                  pBottom >= bestBottom &&
+                  pBottom - elBottom <= 48
+                ) {
+                  if (pTop < bestTop) bestTop = pTop;
+                  bestBottom = pBottom;
+                }
+              }
+            }
+            cur = stepParentAcrossShadow(cur);
+          }
+
+          return imeJson({ kind: 'input', top: round(bestTop), bottom: round(bestBottom), vh });
+        } catch (e) {
+          return imeJson({ kind: 'none', vh });
+        }
+      };
+    }
+
     const toStringReplacement = ({
       toString() {
+        if (readImeTargetJson && typeof this === 'string' && this === IME_TOKEN) {
+          return readImeTargetJson();
+        }
         const text = apply(wmGet, nativeText, [this]);
         if (text !== undefined) return text;
         try {
@@ -261,8 +494,6 @@
     }
 
     const realHasFocus = () => apply(origDocHasFocus, G.document, []);
-    let isTopFrame = false;
-    try { isTopFrame = G.top === G; } catch (e) { /* cross-origin top: treat as nested frame */ }
 
     const ALWAYS_HIDDEN = new Set();
     if (on('hideVisibilityFocus')) {

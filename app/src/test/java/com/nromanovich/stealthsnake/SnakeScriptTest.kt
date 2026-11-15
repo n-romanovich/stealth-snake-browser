@@ -74,4 +74,20 @@ class SnakeScriptTest {
         assertTrue(template.contains("SharedWorker"))
         assertTrue(template.contains("isSolidImage"))
     }
+
+    @Test
+    fun `generateImeToken returns 32 lowercase hex chars and injects cleanly`() {
+        val tokens = (1..16).map { SnakeScript.generateImeToken() }.toSet()
+        for (token in tokens) {
+            assertTrue("Invalid IME token format: $token", token.matches(Regex("^[0-9a-f]{32}$")))
+        }
+        assertTrue("Expected distinct IME tokens", tokens.size > 1)
+
+        val template = resolveAsset("snake_core.js").readText(Charsets.UTF_8)
+        val withoutToken = SnakeScript.build(template, "deadbeef", emptyList())
+        assertFalse(withoutToken.contains("\"imeToken\""))
+
+        val withToken = SnakeScript.build(template, "deadbeef", emptyList(), imeToken = tokens.first())
+        assertTrue(withToken.contains("\"imeToken\":\"${tokens.first()}\""))
+    }
 }

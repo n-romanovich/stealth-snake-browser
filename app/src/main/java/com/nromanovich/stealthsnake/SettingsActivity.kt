@@ -21,10 +21,13 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.InputType
 import android.text.TextUtils
 import android.text.TextWatcher
+import android.view.Choreographer
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -305,6 +308,10 @@ class SettingsActivity : AppCompatActivity() {
     private var activeCategoryId: String? = null
     private val categoryContainers = mutableMapOf<String, LinearLayout>()
     private val categoryTitles = mutableMapOf<String, String>()
+    private val deferredUiHandler = Handler(Looper.getMainLooper())
+    private var categoriesBuilt: Boolean = false
+    private var deferredCategoryFrameCallback: Choreographer.FrameCallback? = null
+    private var deferredCategoryRunnable: Runnable? = null
 
     // Values the text inputs were initialised from; lets a rebuild persist un-blurred edits without
     // clobbering pref changes made by presets/profiles/reset in the meantime.
@@ -521,6 +528,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        cancelDeferredCategoriesBuild()
         settleRunnable?.let { contentScroll.removeCallbacks(it) }
         activeHighlightAnimator?.cancel()
         highlightedDrawableRestore?.invoke()
@@ -551,6 +559,7 @@ class SettingsActivity : AppCompatActivity() {
             }
             return
         }
+        ensureCategoriesBuilt()
         categoryContainers[categoryId] ?: return
         activeCategoryId = categoryId
         hubScroll.visibility = View.GONE
@@ -781,6 +790,88 @@ class SettingsActivity : AppCompatActivity() {
         homeUrlInput = null
         customSearchInput = null
         customRulesInput = null
+        cancelDeferredCategoriesBuild()
+        categoriesBuilt = false
+
+        // Build lightweight top-level Hub cards first so Frame 1 renders without waiting on 9 hidden category trees.
+        buildHubCards(colors, density, profiles)
+
+        val targetSectionKey = if (!hasScrolledInitialTarget) intent.getStringExtra(EXTRA_SCROLL_TO_SECTION) else null
+        if (targetSectionKey != null || activeCategoryId != null || searchOverlay != null) {
+            ensureCategoriesBuilt()
+            val targetCategoryId = targetSectionKey?.let { sectionCategoryByKey[it] }
+            if (targetCategoryId != null && targetCategoryId in categoryContainers) {
+                hasScrolledInitialTarget = true
+                sectionViewsByKey[targetSectionKey]?.let { (navItem, section) ->
+                    selectNavItem(navItem, section, palette)
+                }
+                openCategory(targetCategoryId, sectionTargetViewByKey[targetSectionKey])
+            } else {
+                hasScrolledInitialTarget = true
+                val currentCat = activeCategoryId
+                if (currentCat != null && currentCat in categoryContainers) {
+                    openCategory(currentCat)
+                    if (preserveScroll) {
+                        contentScroll.post { contentScroll.scrollTo(0, previousScrollY) }
+                    }
+                } else {
+                    activeCategoryId = null
+                    hubScroll.visibility = View.VISIBLE
+                    contentScroll.visibility = View.GONE
+                    contentScroll.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                    titleView.text = getString(R.string.settings_title)
+                    if (preserveScroll) {
+                        contentScroll.post { contentScroll.scrollTo(0, previousScrollY) }
+                    }
+                }
+            }
+        } else {
+            hasScrolledInitialTarget = true
+            activeCategoryId = null
+            hubScroll.visibility = View.VISIBLE
+            contentScroll.visibility = View.GONE
+            contentScroll.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            titleView.text = getString(R.string.settings_title)
+            scheduleDeferredCategoriesBuild()
+        }
+    }
+
+    private fun cancelDeferredCategoriesBuild() {
+        deferredCategoryFrameCallback?.let { Choreographer.getInstance().removeFrameCallback(it) }
+        deferredCategoryFrameCallback = null
+        deferredCategoryRunnable?.let { deferredUiHandler.removeCallbacks(it) }
+        deferredCategoryRunnable = null
+    }
+
+    private fun scheduleDeferredCategoriesBuild() {
+        if (categoriesBuilt || isFinishing || isDestroyed) return
+        cancelDeferredCategoriesBuild()
+        val buildRunnable = Runnable {
+            deferredCategoryRunnable = null
+            if (!categoriesBuilt && !isFinishing && !isDestroyed) {
+                ensureCategoriesBuilt()
+            }
+        }
+        deferredCategoryRunnable = buildRunnable
+        val frameCallback = Choreographer.FrameCallback {
+            deferredCategoryFrameCallback = null
+            if (!categoriesBuilt && !isFinishing && !isDestroyed) {
+                deferredUiHandler.post(buildRunnable)
+            }
+        }
+        deferredCategoryFrameCallback = frameCallback
+        Choreographer.getInstance().postFrameCallback(frameCallback)
+    }
+
+    private fun ensureCategoriesBuilt() {
+        if (categoriesBuilt || isFinishing || isDestroyed) return
+        cancelDeferredCategoriesBuild()
+        categoriesBuilt = true
+
+        val palette = prefs.themePalette
+        val colors = resolveColors(palette)
+        val density = resources.displayMetrics.density
+        val profiles = prefs.listProfiles()
 
         // Build all 10 category sub-screens in logical first-run onboarding order
 
@@ -1372,38 +1463,8 @@ class SettingsActivity : AppCompatActivity() {
         }
         registerCompatNavItem(getString(R.string.nav_antifp), CAT_ANTIFP, cat9Section, palette)
 
-        // Build top-level Hub cards
-        buildHubCards(colors, density, profiles)
-
-        val targetSectionKey = if (!hasScrolledInitialTarget) intent.getStringExtra(EXTRA_SCROLL_TO_SECTION) else null
-        val targetCategoryId = targetSectionKey?.let { sectionCategoryByKey[it] }
-        if (targetCategoryId != null && targetCategoryId in categoryContainers) {
-            hasScrolledInitialTarget = true
-            sectionViewsByKey[targetSectionKey]?.let { (navItem, section) ->
-                selectNavItem(navItem, section, palette)
-            }
-            openCategory(targetCategoryId, sectionTargetViewByKey[targetSectionKey])
-        } else {
-            hasScrolledInitialTarget = true
-            val currentCat = activeCategoryId
-            if (currentCat != null && currentCat in categoryContainers) {
-                openCategory(currentCat)
-                if (preserveScroll) {
-                    contentScroll.post { contentScroll.scrollTo(0, previousScrollY) }
-                }
-            } else {
-                activeCategoryId = null
-                hubScroll.visibility = View.VISIBLE
-                contentScroll.visibility = View.GONE
-                contentScroll.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                titleView.text = getString(R.string.settings_title)
-                if (preserveScroll) {
-                    contentScroll.post { contentScroll.scrollTo(0, previousScrollY) }
-                }
-                if (navItems.isNotEmpty() && container.childCount > 0) {
-                    selectNavItem(navItems.first(), container.getChildAt(0), palette, programmatic = false)
-                }
-            }
+        if (navItems.isNotEmpty() && container.childCount > 0 && selectedNavItem == null) {
+            selectNavItem(navItems.first(), container.getChildAt(0), palette, programmatic = false)
         }
         // Keep compiler clean on cat3Nav
         cat3Nav.id
@@ -1635,6 +1696,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun openSearchOverlay() {
+        ensureCategoriesBuilt()
         closeSearchOverlay()
         val colors = resolveColors(prefs.themePalette)
         val density = resources.displayMetrics.density

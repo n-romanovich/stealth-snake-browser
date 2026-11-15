@@ -546,4 +546,118 @@ class BrowserUiLifecycleTest {
 
         ctrl.pause().destroy()
     }
+
+    @Test
+    fun `launchActivity overflow entries start activity before popup dismisses and clean up silently onStop`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        SnakePreferences(ctx).onboardingCompleted = true
+        val ctrl = Robolectric.buildActivity(MainActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
+        val activity = ctrl.get()
+
+        activity.findViewById<android.widget.ImageButton>(R.id.btnMenu).performClick()
+        ShadowLooper.idleMainLooper()
+        val popup = Shadows.shadowOf(ApplicationProvider.getApplicationContext<android.app.Application>()).latestPopupWindow
+        assertNotNull(popup)
+        assertTrue(popup!!.isShowing)
+
+        fun findLabelView(v: View, text: String): View? {
+            if (v is android.widget.TextView && v.text?.toString() == text) return v
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) {
+                    findLabelView(v.getChildAt(i), text)?.let { return it }
+                }
+            }
+            return null
+        }
+
+        val settingsRow = findLabelView(popup.contentView, ctx.getString(R.string.btn_settings))!!.parent as View
+        settingsRow.performClick()
+
+        // SettingsActivity must be launched IMMEDIATELY without waiting for popup dismissal animation.
+        val launched = Shadows.shadowOf(activity).nextStartedActivity
+        assertNotNull(launched)
+        assertEquals(SettingsActivity::class.java.name, launched.component?.className)
+        assertTrue("Popup remains visually on top until Activity transition starts", popup.isShowing)
+
+        // When MainActivity moves to onStop (covered by SettingsActivity), popup closes silently without exit anim.
+        ctrl.pause().stop()
+        assertFalse(popup.isShowing)
+        assertEquals(0, popup.animationStyle)
+
+        ctrl.destroy()
+    }
+
+    @Test
+    fun `DOM-aware IME elevation handles bottom pill top box send button offscreen hidden_tiny caret tall and wipe`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        SnakePreferences(ctx).onboardingCompleted = true
+        val ctrl = Robolectric.buildActivity(MainActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
+        val activity = ctrl.get()
+
+        val webViewContainer = activity.findViewById<View>(R.id.webViewContainer)
+        webViewContainer.measure(
+            View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY)
+        )
+        webViewContainer.layout(0, 120, 1080, 1120)
+
+        // 1. Google AI / Gemini pattern: bottom pill elevates even if tap was near top.
+        activity.onImeInsetChangedForTest(imeBottomPx = 520, touchYInWebView = 60f)
+        activity.onDomInputBoundsForTest("""{"kind":"input","top":820,"bottom":900,"vh":1000}""")
+        assertTrue("Bottom DOM composer pill must elevate above IME", webViewContainer.translationY < -300f)
+
+        // 2. Send button clicked (kind=none) keeps existing negative shift until IME closes!
+        val prevShift = webViewContainer.translationY
+        activity.onDomInputBoundsForTest("""{"kind":"none","vh":1000}""")
+        assertEquals(prevShift, webViewContainer.translationY, 0.5f)
+
+        // 3. IME closes -> translationY resets to 0, then kind=none without prior shift stays 0.
+        activity.onImeInsetChangedForTest(imeBottomPx = 0)
+        assertEquals(0f, webViewContainer.translationY, 0.5f)
+        activity.onImeInsetChangedForTest(imeBottomPx = 520, touchYInWebView = -1f)
+        activity.onDomInputBoundsForTest("""{"kind":"none","vh":1000}""")
+        assertEquals(0f, webViewContainer.translationY, 0.5f)
+
+        // 4. Top search box never unnecessarily shifts even with stale bottom touchY.
+        activity.onImeInsetChangedForTest(imeBottomPx = 520, touchYInWebView = 920f)
+        activity.onDomInputBoundsForTest("""{"kind":"input","top":12,"bottom":56,"vh":1000}""")
+        assertEquals(0f, webViewContainer.translationY, 0.5f)
+
+        // 5. Top safety clamp: tall-ish box starting near top cannot be clipped above 8dp top edge.
+        activity.onDomInputBoundsForTest("""{"kind":"input","top":40,"bottom":900,"vh":1000}""")
+        val density = activity.resources.displayMetrics.density
+        assertTrue(
+            "Input top must not be pushed above 8dp top edge: translationY=${webViewContainer.translationY}",
+            40f + webViewContainer.translationY >= (8f * density) - 1f
+        )
+
+        // 6. Scrolled offscreen -> resets translationY to 0.
+        activity.onDomInputBoundsForTest("""{"kind":"offscreen","vh":1000}""")
+        assertEquals(0f, webViewContainer.translationY, 0.5f)
+
+        // 7. Hidden 1x1 trap falls back to lastWebViewTouchY.
+        activity.onImeInsetChangedForTest(imeBottomPx = 520, touchYInWebView = 940f)
+        activity.onDomInputBoundsForTest("""{"kind":"hidden_tiny","vh":1000}""")
+        assertTrue("hidden_tiny must fall back to touchY", webViewContainer.translationY < -300f)
+
+        // 8. Large multiline editor (tall) clamps touchY within container: top line stays 0, bottom line shifts.
+        activity.onImeInsetChangedForTest(imeBottomPx = 520, touchYInWebView = 150f)
+        activity.onDomInputBoundsForTest("""{"kind":"tall","top":100,"bottom":920,"vh":1000}""")
+        assertEquals(0f, webViewContainer.translationY, 0.5f)
+        activity.onImeInsetChangedForTest(imeBottomPx = 520, touchYInWebView = 880f)
+        activity.onDomInputBoundsForTest("""{"kind":"tall","top":100,"bottom":920,"vh":1000}""")
+        assertTrue("Bottom tap inside tall editor must elevate", webViewContainer.translationY < -300f)
+
+        // 9. Caret inside tall editor tracks caret bottom rather than top of container.
+        activity.onDomInputBoundsForTest("""{"kind":"caret","top":740,"bottom":765,"containerTop":100,"containerBottom":920,"vh":1000}""")
+        assertTrue("Lower caret must elevate cleanly", webViewContainer.translationY < -200f)
+
+        // 10. Wiping session clears DOM/IME state cleanly.
+        activity.wipeSession(reloadBlank = false, reseed = false)
+        assertEquals(0f, webViewContainer.translationY, 0.5f)
+
+        ctrl.pause().destroy()
+    }
 }

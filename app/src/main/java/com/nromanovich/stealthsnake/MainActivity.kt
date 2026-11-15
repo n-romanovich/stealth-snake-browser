@@ -34,6 +34,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
@@ -77,6 +78,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
+import kotlin.math.min
+import org.json.JSONObject
 
 /**
  * Minimal hardened browser host with Chrome-like top bar, pull-to-refresh,
@@ -205,6 +208,14 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     private var touchDownY: Float = 0f
     private var touchDownLocalY: Float = -1f
     private var suppressImeShiftUntilClosed: Boolean = false
+    private var isImeProbeWindowActive: Boolean = true
+    private var domInputProbeGeneration: Int = 0
+    private var domInputKind: String? = null
+    private var domInputTopPx: Float = -1f
+    private var domInputBottomPx: Float = -1f
+    private var domInputWasEditableInCurrentIme: Boolean = false
+    private val delayedDomProbeRunnables = ArrayList<Runnable>(3)
+    private var imeDomWatcherRunnable: Runnable? = null
 
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -429,10 +440,17 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
         val rootFrame = findViewById<View>(R.id.rootFrame)
         ViewCompat.setOnApplyWindowInsetsListener(rootFrame) { v, insets ->
+            val prevIme = lastImeBottomPx
             val nextIme = extractEffectiveImeBottom(insets)
-            if (nextIme == 0) suppressImeShiftUntilClosed = false
+            if (nextIme == 0) {
+                suppressImeShiftUntilClosed = false
+                cancelDomImeProbes(clearState = true)
+            }
             lastImeBottomPx = nextIme
-            updateWebViewImeTranslation()
+            updateWebViewImeTranslation(animateDomChange = false)
+            if (nextIme > 0 && (prevIme == 0 || abs(nextIme - prevIme) > 8)) {
+                scheduleDomImeProbes(includeDelayedRetries = true)
+            }
             ViewCompat.onApplyWindowInsets(v, insets)
         }
         ViewCompat.setWindowInsetsAnimationCallback(
@@ -444,11 +462,20 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                 ): WindowInsetsCompat {
                     if (runningAnimations.any { (it.typeMask and WindowInsetsCompat.Type.ime()) != 0 }) {
                         val nextIme = extractEffectiveImeBottom(insets)
-                        if (nextIme == 0) suppressImeShiftUntilClosed = false
+                        if (nextIme == 0) {
+                            suppressImeShiftUntilClosed = false
+                            cancelDomImeProbes(clearState = true)
+                        }
                         lastImeBottomPx = nextIme
-                        updateWebViewImeTranslation()
+                        updateWebViewImeTranslation(animateDomChange = false)
                     }
                     return insets
+                }
+
+                override fun onEnd(animation: WindowInsetsAnimationCompat) {
+                    if ((animation.typeMask and WindowInsetsCompat.Type.ime()) != 0 && lastImeBottomPx > 0) {
+                        scheduleDomImeProbes(includeDelayedRetries = true)
+                    }
                 }
             }
         )
@@ -468,7 +495,135 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             onboardingDialog?.isShowing == true ||
             transientDialogs.any { it.isShowing }
 
-    private fun updateWebViewImeTranslation() {
+    private fun canProbeDomForIme(): Boolean =
+        !isFinishing &&
+            !isDestroyed &&
+            isImeProbeWindowActive &&
+            lastImeBottomPx > 0 &&
+            !suppressImeShiftUntilClosed &&
+            !urlInput.hasFocus() &&
+            !findInput.hasFocus() &&
+            !isPinLocked &&
+            customFullscreenView == null &&
+            readerOverlay == null &&
+            !hasBlockingDialogOpen() &&
+            activeSession.isWebViewAttached &&
+            startPageCard.visibility != View.VISIBLE &&
+            errorOverlay.visibility != View.VISIBLE &&
+            vpnBlockedView.visibility != View.VISIBLE
+
+    private fun cancelDomImeProbes(clearState: Boolean) {
+        domInputProbeGeneration++
+        delayedDomProbeRunnables.forEach { mainHandler.removeCallbacks(it) }
+        delayedDomProbeRunnables.clear()
+        imeDomWatcherRunnable?.let { mainHandler.removeCallbacks(it) }
+        imeDomWatcherRunnable = null
+        if (clearState) {
+            domInputKind = null
+            domInputTopPx = -1f
+            domInputBottomPx = -1f
+            domInputWasEditableInCurrentIme = false
+        }
+    }
+
+    private fun scheduleDomImeProbes(includeDelayedRetries: Boolean) {
+        if (!canProbeDomForIme()) return
+        delayedDomProbeRunnables.forEach { mainHandler.removeCallbacks(it) }
+        delayedDomProbeRunnables.clear()
+        probeDomImeTargetOnce()
+        if (includeDelayedRetries) {
+            for (delayMs in longArrayOf(90L, 240L)) {
+                val r = Runnable {
+                    if (canProbeDomForIme()) {
+                        probeDomImeTargetOnce()
+                    }
+                }
+                delayedDomProbeRunnables.add(r)
+                mainHandler.postDelayed(r, delayMs)
+            }
+        }
+        ensureImeDomWatcherRunning()
+    }
+
+    private fun ensureImeDomWatcherRunning() {
+        if (imeDomWatcherRunnable != null || !canProbeDomForIme()) return
+        val watcher = object : Runnable {
+            override fun run() {
+                if (!canProbeDomForIme()) {
+                    imeDomWatcherRunnable = null
+                    return
+                }
+                probeDomImeTargetOnce()
+                mainHandler.postDelayed(this, 280L)
+            }
+        }
+        imeDomWatcherRunnable = watcher
+        mainHandler.postDelayed(watcher, 280L)
+    }
+
+    private fun probeDomImeTargetOnce() {
+        val targetSession = activeSession
+        if (!canProbeDomForIme()) return
+        val generation = domInputProbeGeneration
+        val token = targetSession.imeToken
+        if (token.isBlank()) return
+        targetSession.webView.evaluateJavascript("Function.prototype.toString.call(${JSONObject.quote(token)})") { raw ->
+            if (isFinishing || isDestroyed || generation != domInputProbeGeneration || targetSession !== activeSession || lastImeBottomPx <= 0) {
+                return@evaluateJavascript
+            }
+            val decoded = runCatching {
+                if (raw.isNullOrBlank() || raw == "null") null
+                else JSONObject("{\"v\":$raw}").optString("v", "")
+            }.getOrNull()?.takeIf { it.startsWith("{") } ?: return@evaluateJavascript
+            applyDomImeProbeJson(decoded, animateDomChange = true)
+        }
+    }
+
+    private fun applyDomImeProbeJson(json: String, animateDomChange: Boolean) {
+        val obj = runCatching { JSONObject(json) }.getOrNull() ?: return
+        val kind = obj.optString("kind", "").takeIf { it.isNotEmpty() } ?: return
+        val vh = obj.optDouble("vh", 0.0).toFloat()
+        val containerH = webViewContainer.height
+        val scale = if (vh > 0f && containerH > 0) {
+            containerH.toFloat() / vh
+        } else {
+            resources.displayMetrics.density
+        }
+        domInputKind = kind
+        when (kind) {
+            "input", "iframe", "caret", "tall" -> {
+                domInputWasEditableInCurrentIme = true
+                val topCss = obj.optDouble("top", Double.NaN)
+                val bottomCss = obj.optDouble("bottom", Double.NaN)
+                if (!topCss.isNaN() && !bottomCss.isNaN()) {
+                    domInputTopPx = (topCss.toFloat() * scale)
+                    domInputBottomPx = (bottomCss.toFloat() * scale)
+                }
+            }
+            "hidden_tiny" -> {
+                domInputWasEditableInCurrentIme = true
+                domInputTopPx = -1f
+                domInputBottomPx = -1f
+            }
+            "offscreen" -> {
+                domInputWasEditableInCurrentIme = false
+                domInputTopPx = -1f
+                domInputBottomPx = -1f
+            }
+            else -> {
+                domInputTopPx = -1f
+                domInputBottomPx = -1f
+            }
+        }
+        updateWebViewImeTranslation(animateDomChange = animateDomChange)
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun onDomInputBoundsForTest(json: String, animate: Boolean = false) {
+        applyDomImeProbeJson(json, animateDomChange = animate)
+    }
+
+    private fun updateWebViewImeTranslation(animateDomChange: Boolean = false) {
         val shouldShift = lastImeBottomPx > 0 &&
             !suppressImeShiftUntilClosed &&
             !urlInput.hasFocus() &&
@@ -477,38 +632,97 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             customFullscreenView == null &&
             readerOverlay == null &&
             !hasBlockingDialogOpen()
-        if (!shouldShift) {
-            webViewContainer.translationY = 0f
-            return
-        }
-        val containerH = webViewContainer.height
-        if (containerH <= 0) {
-            val fallbackMax = 260f * resources.displayMetrics.density
-            webViewContainer.translationY = -lastImeBottomPx.toFloat().coerceAtMost(fallbackMax)
-            return
-        }
-        val imePx = lastImeBottomPx.toFloat().coerceAtMost(containerH * 0.85f)
-        val visibleBottom = containerH.toFloat() - imePx
-        if (lastWebViewTouchY >= 0f) {
-            val breathingMargin = 56f * resources.displayMetrics.density
-            val targetBottom = (lastWebViewTouchY + breathingMargin).coerceAtMost(containerH.toFloat())
-            val overlap = targetBottom - visibleBottom
-            webViewContainer.translationY = if (overlap > 0f) {
-                -overlap.coerceIn(0f, imePx)
-            } else {
-                0f
-            }
+        val desiredTranslationY = if (!shouldShift) {
+            0f
         } else {
-            webViewContainer.translationY = -imePx
+            val containerH = webViewContainer.height
+            val density = resources.displayMetrics.density
+            if (containerH <= 0) {
+                val fallbackMax = 260f * density
+                -lastImeBottomPx.toFloat().coerceAtMost(fallbackMax)
+            } else {
+                val imePx = lastImeBottomPx.toFloat().coerceAtMost(containerH * 0.85f)
+                val visibleBottom = containerH.toFloat() - imePx
+                when (domInputKind) {
+                    "offscreen" -> 0f
+                    "none" -> {
+                        if (domInputWasEditableInCurrentIme && webViewContainer.translationY < -0.5f) {
+                            webViewContainer.translationY.coerceIn(-imePx, 0f)
+                        } else {
+                            0f
+                        }
+                    }
+                    "input", "iframe", "caret" -> {
+                        if (domInputBottomPx > 0f) {
+                            val margin = if (domInputKind == "caret") 24f * density else 20f * density
+                            val targetBottom = (domInputBottomPx + margin).coerceAtMost(containerH.toFloat())
+                            val overlap = targetBottom - visibleBottom
+                            var shift = if (overlap > 0f) overlap.coerceIn(0f, imePx) else 0f
+                            val minTopSafety = 8f * density
+                            val allowedTopFloor = min(domInputTopPx, minTopSafety)
+                            val maxShiftWithoutTopClip = (domInputTopPx - allowedTopFloor).coerceAtLeast(0f)
+                            shift = shift.coerceAtMost(maxShiftWithoutTopClip)
+                            if (shift > 0f) -shift else 0f
+                        } else {
+                            computeTouchFallbackTranslationY(containerH, imePx, visibleBottom, density)
+                        }
+                    }
+                    "tall" -> {
+                        val effectiveY = when {
+                            lastWebViewTouchY >= 0f && domInputBottomPx > domInputTopPx ->
+                                lastWebViewTouchY.coerceIn(domInputTopPx.coerceAtLeast(0f), domInputBottomPx.coerceAtLeast(0f))
+                            lastWebViewTouchY >= 0f -> lastWebViewTouchY
+                            domInputBottomPx > 0f -> domInputBottomPx
+                            else -> -1f
+                        }
+                        if (effectiveY >= 0f) {
+                            val targetBottom = (effectiveY + 56f * density).coerceAtMost(containerH.toFloat())
+                            val overlap = targetBottom - visibleBottom
+                            if (overlap > 0f) -overlap.coerceIn(0f, imePx) else 0f
+                        } else {
+                            -imePx
+                        }
+                    }
+                    else -> computeTouchFallbackTranslationY(containerH, imePx, visibleBottom, density)
+                }
+            }
         }
+        if (!animateDomChange || !shouldShift || abs(webViewContainer.translationY - desiredTranslationY) < 1f) {
+            webViewContainer.animate().cancel()
+            webViewContainer.translationY = desiredTranslationY
+        } else {
+            webViewContainer.animate().cancel()
+            webViewContainer.animate()
+                .translationY(desiredTranslationY)
+                .setDuration(160L)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        }
+    }
+
+    private fun computeTouchFallbackTranslationY(
+        containerH: Int,
+        imePx: Float,
+        visibleBottom: Float,
+        density: Float
+    ): Float = if (lastWebViewTouchY >= 0f) {
+        val breathingMargin = 56f * density
+        val targetBottom = (lastWebViewTouchY + breathingMargin).coerceAtMost(containerH.toFloat())
+        val overlap = targetBottom - visibleBottom
+        if (overlap > 0f) -overlap.coerceIn(0f, imePx) else 0f
+    } else {
+        -imePx
     }
 
     @androidx.annotation.VisibleForTesting
     internal fun onImeInsetChangedForTest(imeBottomPx: Int, touchYInWebView: Float = lastWebViewTouchY) {
         lastImeBottomPx = imeBottomPx.coerceAtLeast(0)
+        if (lastImeBottomPx == 0) {
+            cancelDomImeProbes(clearState = true)
+        }
         lastWebViewTouchY = touchYInWebView
         suppressImeShiftUntilClosed = false
-        updateWebViewImeTranslation()
+        updateWebViewImeTranslation(animateDomChange = false)
     }
 
     private fun applySessionWebViewProfile(targetView: WebView, session: BrowserSession) {
@@ -624,8 +838,10 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                     session.currentTitle = ""
                 }
                 if (session === activeSession) {
+                    cancelDomImeProbes(clearState = true)
                     updateUrlDisplay(url, forceUpdateText = false)
                     updateStartPageCardVisibility(url)
+                    updateWebViewImeTranslation()
                 }
             },
             onPageFinishedCallback = { url ->
@@ -990,6 +1206,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         )
         val signature = buildString {
             append(session.sessionSeed).append('|')
+            append(session.imeToken).append('|')
             append(flags).append('|')
             append(blocklistSignatureFor(sessionBlocklist))
         }
@@ -1003,7 +1220,8 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             blocklistRules = sessionBlocklist.rules,
             flags = flags,
             chromeMajor = webViewChromeMajor,
-            chromeFullVersion = webViewChromeFullVersion
+            chromeFullVersion = webViewChromeFullVersion,
+            imeToken = session.imeToken
         )
         session.scriptHandler = SnakeScript.install(session.webView, compiled)
         session.lastSnakeBuildSignature = signature
@@ -1307,7 +1525,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_share, getString(R.string.menu_share_url), hasPage) {
                 shareCurrentUrl()
             },
-            BrowserUiHelper.MenuEntry(R.drawable.ic_settings_downloads, getString(R.string.btn_downloads), true) {
+            BrowserUiHelper.MenuEntry(R.drawable.ic_settings_downloads, getString(R.string.btn_downloads), true, launchActivity = true) {
                 startActivity(Intent(this, DownloadsActivity::class.java))
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_find, getString(R.string.btn_find_in_page), true) {
@@ -1336,7 +1554,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_print_pdf, getString(R.string.menu_print_pdf), hasLoadedPage) {
                 printCurrentPage()
             },
-            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_captures, getString(R.string.btn_captures_viewer), true) {
+            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_captures, getString(R.string.btn_captures_viewer), true, launchActivity = true) {
                 startActivity(Intent(this, CapturesActivity::class.java))
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_clear_site, getString(R.string.menu_clear_site_data), hasPage) {
@@ -1345,7 +1563,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_wipe, getString(R.string.btn_wipe), true) {
                 requestWipeSession()
             },
-            BrowserUiHelper.MenuEntry(R.drawable.ic_settings_gear, getString(R.string.btn_settings), true) {
+            BrowserUiHelper.MenuEntry(R.drawable.ic_settings_gear, getString(R.string.btn_settings), true, launchActivity = true) {
                 startActivity(Intent(this, SettingsActivity::class.java))
             }
         )
@@ -2399,6 +2617,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         if (target !in sessions) return
         val switching = target !== activeSession
         if (switching) {
+            cancelDomImeProbes(clearState = true)
             closeFindBar()
             closeReaderMode()
             exitFullscreenVideo()
@@ -3022,6 +3241,11 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         exitFullscreenVideo()
         closeActivePopupWindow()
         hideErrorOverlay(updateStartCard = false)
+        cancelDomImeProbes(clearState = true)
+        suppressImeShiftUntilClosed = false
+        lastImeBottomPx = 0
+        lastWebViewTouchY = -1f
+        updateWebViewImeTranslation(animateDomChange = false)
         fileUploadGeneration.incrementAndGet()
         pendingFileUploadCallback?.onReceiveValue(null)
         pendingFileUploadCallback = null
@@ -3149,13 +3373,16 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                     }
                     MotionEvent.ACTION_UP -> {
                         if (touchDownLocalY >= 0f) {
-                            val slop = ViewConfiguration.get(this).scaledTouchSlop
+                            val slop = ViewConfiguration.get(this).scaledTouchSlop * 2.5f
                             if (abs(ev.x - touchDownX) <= slop && abs(ev.y - touchDownY) <= slop) {
                                 lastWebViewTouchY = touchDownLocalY
                                 suppressImeShiftUntilClosed = false
                                 if (lastImeBottomPx > 0) {
-                                    updateWebViewImeTranslation()
+                                    updateWebViewImeTranslation(animateDomChange = false)
+                                    scheduleDomImeProbes(includeDelayedRetries = true)
                                 }
+                            } else if (lastImeBottomPx > 0) {
+                                scheduleDomImeProbes(includeDelayedRetries = true)
                             }
                         }
                         touchDownLocalY = -1f
@@ -3175,6 +3402,8 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     }
 
     override fun onStop() {
+        BrowserUiHelper.dismissPopupSilently(activeMenuPopup)
+        activeMenuPopup = null
         unregisterVpnNetworkCallback()
         if (!isChangingConfigurations && !isFinishing) {
             persistSessionsIfAllowed()
@@ -3340,6 +3569,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
     override fun onResume() {
         super.onResume()
+        isImeProbeWindowActive = true
         // Enforce before applyRuntimePreferences() / showOnboardingIfNeeded(),
         // since onActivityResumed dispatches after onResume().
         PinLockCoordinator.enforceLockIfNeeded(this)
@@ -3347,10 +3577,16 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             applyRuntimePreferences()
             showOnboardingIfNeeded()
         }
+        if (lastImeBottomPx > 0 && canProbeDomForIme()) {
+            scheduleDomImeProbes(includeDelayedRetries = true)
+        }
     }
 
     override fun onPause() {
-        activeMenuPopup?.dismiss()
+        isImeProbeWindowActive = false
+        cancelDomImeProbes(clearState = false)
+        BrowserUiHelper.dismissPopupSilently(activeMenuPopup)
+        activeMenuPopup = null
         microJitter.stop()
         super.onPause()
         // Intentionally avoid webView.onPause() / pauseTimers() to minimize background timing leaks.
@@ -3381,7 +3617,9 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     }
 
     override fun onDestroy() {
-        activeMenuPopup?.dismiss()
+        BrowserUiHelper.dismissPopupSilently(activeMenuPopup)
+        activeMenuPopup = null
+        cancelDomImeProbes(clearState = true)
         activeSessionsSheet?.dismiss()
         onboardingDialog?.dismiss()
         activePopupExtractors.toList().forEach { wv ->

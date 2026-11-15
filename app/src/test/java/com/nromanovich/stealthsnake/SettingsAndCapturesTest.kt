@@ -38,6 +38,7 @@ class SettingsAndCapturesTest {
     fun `settings activity toggles vpn switches and resets defaults`() {
         val prefs = SnakePreferences(ctx)
         val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
         val activity = controller.get()
         val root = (activity.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
 
@@ -81,6 +82,7 @@ class SettingsAndCapturesTest {
         PinLockCoordinator.markUnlocked()
 
         val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
         val activity = controller.get()
         ShadowLooper.idleMainLooper()
         val root = (activity.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
@@ -122,6 +124,7 @@ class SettingsAndCapturesTest {
         prefs.noiseCanvasWebgl = false
 
         val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
         val activity = controller.get()
         val root = (activity.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
 

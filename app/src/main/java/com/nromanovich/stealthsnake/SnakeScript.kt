@@ -37,6 +37,14 @@ object SnakeScript {
     fun generateSessionSeed(random: SecureRandom = secureRandom): String =
         "%08x".format(random.nextInt())
 
+    fun generateImeToken(random: SecureRandom = secureRandom): String =
+        "%08x%08x%08x%08x".format(
+            random.nextInt(),
+            random.nextInt(),
+            random.nextInt(),
+            random.nextInt()
+        )
+
     fun loadTemplate(context: Context, assetName: String = ASSET_SNAKE_CORE): String =
         context.assets.open(assetName).use { loadTemplate(it) }
 
@@ -53,7 +61,8 @@ object SnakeScript {
         blocklistRules: List<String>,
         flags: FeatureFlags = FeatureFlags(),
         chromeMajor: Int = DEFAULT_CHROME_MAJOR,
-        chromeFullVersion: String? = null
+        chromeFullVersion: String? = null,
+        imeToken: String? = null
     ): String {
         require(seed.matches(Regex("^[0-9a-f]{8}$"))) { "Session seed must be 8 lowercase hex chars" }
         val first = template.indexOf(CONFIG_TOKEN)
@@ -81,6 +90,7 @@ object SnakeScript {
             // Keeps navigator.userAgent / userAgentData in lock-step with the HTTP User-Agent header.
             put("chromeMajor", chromeMajor)
             if (!chromeFullVersion.isNullOrBlank()) put("chromeFullVersion", chromeFullVersion)
+            if (!imeToken.isNullOrBlank()) put("imeToken", imeToken)
         }
         return template.replace(CONFIG_TOKEN, config.toString(), ignoreCase = false)
     }

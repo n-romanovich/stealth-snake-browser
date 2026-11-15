@@ -66,6 +66,7 @@ class SettingsAndThemeLifecycleTest {
     fun `SettingsActivity saves text on blur exposes jitter steppers SYSTEM locale and preserves scroll on theme change`() {
         val prefs = SnakePreferences(ctx)
         val ctrl = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
         val activity = ctrl.get()
         val root = (activity.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
 
@@ -175,6 +176,7 @@ class SettingsAndThemeLifecycleTest {
         assertEquals(expectedAdjust, info.softInputMode)
 
         val ctrl = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
         val activity = ctrl.get()
         val root = (activity.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
 
@@ -305,6 +307,47 @@ class SettingsAndThemeLifecycleTest {
         assertNull("Completed highlight must restore card foreground", forceDarkCard.foreground)
 
         ctrl.pause().destroy()
+    }
+
+    @Test
+    fun `SettingsActivity defers category sub-screens until after first frame while building on demand immediately`() {
+        // Case 1: Initial create/start/resume renders Hub cards immediately, defers 9 hidden categories until Frame 1 settles.
+        val ctrl = Robolectric.buildActivity(SettingsActivity::class.java).create().start().resume()
+        val activity = ctrl.get()
+        val root = (activity.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
+        val hubScroll = collectViews(root) { it is NestedScrollView }.first() as NestedScrollView
+        val contentScroll = collectViews(root) { it is ScrollView }.last() as ScrollView
+        val hubContainer = hubScroll.getChildAt(0) as ViewGroup
+        val container = contentScroll.getChildAt(0) as ViewGroup
+
+        assertEquals(View.VISIBLE, hubScroll.visibility)
+        assertEquals(View.GONE, contentScroll.visibility)
+        assertTrue("Hub cards must render synchronously on Frame 1", hubContainer.childCount > 0)
+        assertEquals("Category containers must defer until after Frame 1", 0, container.childCount)
+
+        ctrl.visible()
+        ShadowLooper.idleMainLooper(50, TimeUnit.MILLISECONDS)
+        assertTrue("Deferred category containers must build after Frame 1", container.childCount >= 9)
+        ctrl.pause().destroy()
+
+        // Case 2: Tapping Search immediately before Frame 1 completes builds categories synchronously on demand.
+        val ctrlSearch = Robolectric.buildActivity(SettingsActivity::class.java).create().start().resume()
+        val actSearch = ctrlSearch.get()
+        val rootSearch = (actSearch.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
+        val contentScrollSearch = collectViews(rootSearch) { it is ScrollView }.last() as ScrollView
+        val containerSearch = contentScrollSearch.getChildAt(0) as ViewGroup
+        assertEquals(0, containerSearch.childCount)
+        val searchBtn = collectViews(rootSearch) {
+            it is ImageButton && it.contentDescription?.toString() == ctx.getString(R.string.settings_search_hint)
+        }.first()
+        searchBtn.performClick()
+        assertTrue("Opening Search must build category index synchronously on demand", containerSearch.childCount >= 9)
+        ctrlSearch.pause().destroy()
+
+        // Case 3: Destroying before Frame 1 runs cleanly cancels deferred callbacks with zero crash.
+        val ctrlFastClose = Robolectric.buildActivity(SettingsActivity::class.java).create().start().resume()
+        ctrlFastClose.pause().destroy()
+        ShadowLooper.idleMainLooper(50, TimeUnit.MILLISECONDS)
     }
 
     private fun collectViews(root: View, predicate: (View) -> Boolean): List<View> {

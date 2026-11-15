@@ -47,6 +47,7 @@ class BrowserSession(
     var pageSslBypassed: Boolean = false
     var pageSslBypassedHost: String? = null
     var pendingVpnUrl: String? = null
+    var imeToken: String = SnakeScript.generateImeToken()
 
     var currentUrl: String = MainActivity.DEFAULT_START_URL
     var currentTitle: String = ""
@@ -62,6 +63,7 @@ class BrowserSession(
 
     fun resetSessionState() {
         navigationGeneration++
+        imeToken = SnakeScript.generateImeToken()
         blockedRequestCount = 0
         pendingVpnUrl = null
         lastCrashRecoveryAtMs = 0L

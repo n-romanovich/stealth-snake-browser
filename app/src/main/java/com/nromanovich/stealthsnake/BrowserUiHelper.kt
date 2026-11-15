@@ -34,8 +34,16 @@ object BrowserUiHelper {
         val iconRes: Int,
         val title: String,
         val enabled: Boolean,
+        val launchActivity: Boolean = false,
         val action: () -> Unit
     )
+
+    fun dismissPopupSilently(popup: PopupWindow?) {
+        if (popup == null) return
+        popup.animationStyle = 0
+        popup.update()
+        popup.dismiss()
+    }
 
     fun showOverflowMenu(
         activity: Activity,
@@ -79,8 +87,15 @@ object BrowserUiHelper {
                 isEnabled = entry.enabled
                 alpha = if (entry.enabled) 1.0f else 0.4f
                 setOnClickListener {
-                    popup.dismiss()
-                    entry.action()
+                    if (entry.launchActivity) {
+                        // Start the destination Activity before tearing down the popup so WindowManager
+                        // doesn't wait for the menu close animation or flash the toolbar underneath.
+                        entry.action()
+                        anchor.postDelayed({ dismissPopupSilently(popup) }, 150L)
+                    } else {
+                        popup.dismiss()
+                        entry.action()
+                    }
                 }
             }
             val icon = ImageView(activity).apply {
