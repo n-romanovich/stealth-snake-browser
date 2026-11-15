@@ -1237,18 +1237,18 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             BrowserUiHelper.MenuEntry(R.drawable.ic_content_copy, getString(R.string.btn_copy_url), true) {
                 copyCurrentUrl()
             },
-            BrowserUiHelper.MenuEntry(R.drawable.ic_content_copy, getString(R.string.menu_share_url), hasPage) {
+            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_share, getString(R.string.menu_share_url), hasPage) {
                 shareCurrentUrl()
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_find, getString(R.string.btn_find_in_page), true) {
                 findBar.visibility = View.VISIBLE
                 findInput.requestFocus()
             },
-            BrowserUiHelper.MenuEntry(R.drawable.ic_info_outline, getString(R.string.menu_bookmarks), true) {
+            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_bookmarks, getString(R.string.menu_bookmarks), true) {
                 openBookmarksSheet()
             },
             BrowserUiHelper.MenuEntry(
-                R.drawable.ic_info_outline,
+                if (isBookmarked) R.drawable.ic_menu_bookmark_added else R.drawable.ic_menu_bookmark_add,
                 getString(if (isBookmarked) R.string.menu_bookmark_remove else R.string.menu_bookmark_add),
                 hasPage
             ) {
@@ -1257,13 +1257,13 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             BrowserUiHelper.MenuEntry(R.drawable.ic_screenshot, getString(R.string.btn_capture), true) {
                 handleCaptureClick()
             },
-            BrowserUiHelper.MenuEntry(R.drawable.ic_info_outline, getString(R.string.btn_reader_mode), hasLoadedPage) {
+            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_reader, getString(R.string.btn_reader_mode), hasLoadedPage) {
                 openReaderMode()
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_content_copy, getString(R.string.btn_save_offline), hasLoadedPage) {
                 saveCurrentPageOffline()
             },
-            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_captures, getString(R.string.menu_print_pdf), hasLoadedPage) {
+            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_print_pdf, getString(R.string.menu_print_pdf), hasLoadedPage) {
                 printCurrentPage()
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_settings_downloads, getString(R.string.btn_downloads), true) {
@@ -1272,7 +1272,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_captures, getString(R.string.btn_captures_viewer), true) {
                 startActivity(Intent(this, CapturesActivity::class.java))
             },
-            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_wipe, getString(R.string.menu_clear_site_data), hasPage) {
+            BrowserUiHelper.MenuEntry(R.drawable.ic_menu_clear_site, getString(R.string.menu_clear_site_data), hasPage) {
                 clearCurrentSiteData()
             },
             BrowserUiHelper.MenuEntry(R.drawable.ic_menu_wipe, getString(R.string.btn_wipe), true) {
