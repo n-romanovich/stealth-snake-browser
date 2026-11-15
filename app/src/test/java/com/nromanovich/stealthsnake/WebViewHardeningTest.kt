@@ -145,10 +145,10 @@ class WebViewHardeningTest {
     }
 
     @Test
-    fun `MainActivity with vpnBypassStartCheck updates kill-switch state across VPN transitions`() {
+    fun `MainActivity with vpnCheckStartPage disabled updates kill-switch state across VPN transitions`() {
         val prefs = SnakePreferences(ctx)
         prefs.vpnKillSwitchEnabled = true
-        prefs.vpnBypassStartCheck = true
+        prefs.vpnCheckStartPage = false
         setVpnConnected(false)
 
         val controller = Robolectric.buildActivity(MainActivity::class.java).setup()

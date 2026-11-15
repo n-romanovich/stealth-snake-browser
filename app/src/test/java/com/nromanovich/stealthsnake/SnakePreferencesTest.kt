@@ -2,6 +2,7 @@ package com.nromanovich.stealthsnake
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -32,8 +33,8 @@ class SnakePreferencesTest {
         assertTrue(prefs.noiseCanvasWebgl)
         assertTrue(prefs.microJitterEnabled)
         assertTrue(prefs.lockViewport)
-        assertFalse(prefs.allowFileUploads)
-        assertFalse(prefs.allowOAuthPopups)
+        assertTrue(prefs.blockFileUploads)
+        assertTrue(prefs.blockOAuthPopups)
 
         prefs.applyPreset(ProtectionPreset.COMPATIBILITY)
         assertEquals(ProtectionPreset.COMPATIBILITY, prefs.preset)
@@ -41,14 +42,14 @@ class SnakePreferencesTest {
         assertFalse(prefs.noiseAudio)
         assertFalse(prefs.microJitterEnabled)
         assertFalse(prefs.lockViewport)
-        assertTrue(prefs.allowFileUploads)
-        assertTrue(prefs.allowOAuthPopups)
+        assertFalse(prefs.blockFileUploads)
+        assertFalse(prefs.blockOAuthPopups)
         assertTrue(prefs.builtinBlocklistEnabled)
 
         val compatProfile = prefs.createProfileFromCurrent("CompatSnap")
         assertFalse(compatProfile.lockViewport)
-        assertTrue(compatProfile.allowFileUploads)
-        assertTrue(compatProfile.allowOAuthPopups)
+        assertFalse(compatProfile.blockFileUploads)
+        assertFalse(compatProfile.blockOAuthPopups)
         val roundTripped = SnakeProfile.fromJson(compatProfile.toJson())!!
         assertEquals(compatProfile, roundTripped)
 
@@ -59,8 +60,8 @@ class SnakePreferencesTest {
         assertEquals(ProtectionPreset.MAX_STEALTH, prefs.preset)
         assertTrue(prefs.noiseCanvasWebgl)
         assertTrue(prefs.lockViewport)
-        assertFalse(prefs.allowFileUploads)
-        assertFalse(prefs.allowOAuthPopups)
+        assertTrue(prefs.blockFileUploads)
+        assertTrue(prefs.blockOAuthPopups)
     }
 
     @Test
@@ -93,24 +94,65 @@ class SnakePreferencesTest {
     }
 
     @Test
-    fun `theme palettes, downloads default off, and onboarding flags reset cleanly`() {
+    fun `theme palettes, blocked downloads default on, and onboarding flags reset cleanly`() {
         assertEquals(ThemePalette.OBSIDIAN, prefs.themePalette)
-        assertFalse(prefs.downloadsEnabled)
+        assertTrue(prefs.blockDownloads)
+        assertTrue(prefs.vpnCheckStartPage)
         assertFalse(prefs.startHintDismissed)
         assertFalse(prefs.onboardingCompleted)
 
         prefs.themePalette = ThemePalette.SLATE_LIGHT
         assertTrue(prefs.themePalette.isLight)
-        prefs.downloadsEnabled = true
+        prefs.blockDownloads = false
+        prefs.vpnCheckStartPage = false
         prefs.startHintDismissed = true
         prefs.onboardingCompleted = true
 
         prefs.resetToDefaults()
         assertEquals(ThemePalette.OBSIDIAN, prefs.themePalette)
         assertFalse(prefs.themePalette.isLight)
-        assertFalse(prefs.downloadsEnabled)
+        assertTrue(prefs.blockDownloads)
+        assertTrue(prefs.vpnCheckStartPage)
         assertFalse(prefs.startHintDismissed)
         assertFalse(prefs.onboardingCompleted)
+    }
+
+    @Test
+    fun `legacy reversed-polarity prefs and profile json migrate cleanly to unified block polarity`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val rawPrefs = ctx.getSharedPreferences("stealth_snake_prefs", Context.MODE_PRIVATE)
+        rawPrefs.edit()
+            .clear()
+            .putBoolean("allow_file_uploads", true)
+            .putBoolean("allow_oauth_popups", true)
+            .putBoolean("downloads_enabled", true)
+            .putBoolean("vpn_bypass_start_check", true)
+            .commit()
+
+        val migrated = SnakePreferences(ctx)
+        assertFalse(migrated.blockFileUploads)
+        assertFalse(migrated.blockOAuthPopups)
+        assertFalse(migrated.blockDownloads)
+        assertFalse(migrated.vpnCheckStartPage)
+        assertFalse(rawPrefs.contains("allow_file_uploads"))
+        assertFalse(rawPrefs.contains("allow_oauth_popups"))
+        assertFalse(rawPrefs.contains("downloads_enabled"))
+        assertFalse(rawPrefs.contains("vpn_bypass_start_check"))
+
+        val legacyProfile = SnakeProfile.fromJson(
+            JSONObject()
+                .put("id", "legacy_id")
+                .put("name", "Legacy")
+                .put("allowFileUploads", true)
+                .put("allowOAuthPopups", false)
+        )!!
+        assertFalse(legacyProfile.blockFileUploads)
+        assertTrue(legacyProfile.blockOAuthPopups)
+        val reserialized = legacyProfile.toJson()
+        assertFalse(reserialized.has("allowFileUploads"))
+        assertFalse(reserialized.has("allowOAuthPopups"))
+        assertFalse(reserialized.getBoolean("blockFileUploads"))
+        assertTrue(reserialized.getBoolean("blockOAuthPopups"))
     }
 
     @Test
@@ -245,5 +287,20 @@ class SnakePreferencesTest {
         prefs.customSearchTemplate = "javascript:alert(1)"
         assertEquals("", prefs.customSearchTemplate)
         assertEquals(null, SnakePreferences.buildSearchOrUrl("test", prefs.searchEngine, prefs.customSearchTemplate))
+    }
+
+    @Test
+    fun `applyPreset CUSTOM clears stale activeProfileId`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = SnakePreferences(ctx)
+        prefs.resetToDefaults()
+
+        val profile = prefs.createProfileFromCurrent("Work")
+        assertTrue(prefs.applyProfile(profile.id))
+        assertEquals(profile.id, prefs.activeProfileId)
+
+        prefs.applyPreset(ProtectionPreset.CUSTOM)
+        assertEquals(ProtectionPreset.CUSTOM, prefs.preset)
+        assertEquals(null, prefs.activeProfileId)
     }
 }

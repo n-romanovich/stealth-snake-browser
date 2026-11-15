@@ -50,7 +50,7 @@
 
     <!-- Status & Capture feedback -->
     <string name="status_ready">Protection active</string>
-    <string name="status_captured">Saved to sandbox (%1$s)</string>
+    <string name="status_captured">Screenshot saved (%1$s)</string>
     <string name="status_captured_gallery">Saved to Gallery (%1$s)</string>
     <string name="status_capture_failed">Capture failed</string>
     <string name="status_wiped">Session wiped</string>
@@ -106,7 +106,7 @@
     <string name="hub_sub_pin_on">Enabled</string>
     <string name="hub_sub_pin_off">Disabled</string>
     <string name="hub_sub_wipe">Auto-wipe on exit: %1$s</string>
-    <string name="hub_sub_downloads">Downloads: %1$s · Screenshots: %2$s</string>
+    <string name="hub_sub_downloads">Block downloads: %1$s · Block screenshots: %2$s</string>
     <string name="hub_sub_vpn">Kill-Switch: %1$s · WebRTC block: %2$s</string>
     <string name="hub_sub_blocking">Blocklist: %1$s · Custom rules: %2$d</string>
     <string name="hub_sub_antifp">%1$d shields active · Micro-jitter: %2$s</string>
@@ -152,7 +152,7 @@
     <string name="pref_jitter_enabled">Micro-Jitter</string>
     <string name="pref_jitter_min">Min idle delay (sec)</string>
     <string name="pref_jitter_max">Max idle delay (sec)</string>
-    <string name="pref_block_schemes">Block external schemes (intent:, tel:)</string>
+    <string name="pref_block_schemes">Block opening external apps</string>
     <string name="pref_suppress_dialogs">Suppress JS dialogs</string>
 
     <string name="cat_session_ui">Session &amp; Interface</string>
@@ -162,12 +162,12 @@
     <string name="lang_ru">Русский</string>
     <string name="pref_confirm_wipe">Confirm Wipe</string>
     <string name="pref_auto_wipe_exit">Auto-Wipe on exit</string>
-    <string name="pref_auto_wipe_hint">Disable to keep logins (cookies) between app launches.</string>
+    <string name="pref_auto_wipe_hint">Turn off to stay signed in between launches.</string>
     <string name="pref_block_screenshots">Block screenshots</string>
-    <string name="desc_block_screenshots">Enables FLAG_SECURE: hides Recents preview and blocks screen capture.</string>
+    <string name="desc_block_screenshots">Also hides preview in Recents.</string>
     <string name="cat_downloads">Downloads</string>
-    <string name="pref_downloads_enabled">Allow downloads</string>
-    <string name="pref_downloads_hint">Off by default to block silent downloads. Saves to Downloads/StealthSnake.</string>
+    <string name="pref_block_downloads">Block downloads</string>
+    <string name="pref_block_downloads_hint">When off, saves to Downloads/StealthSnake.</string>
     <string name="pref_theme_palette">Color theme</string>
     <string name="theme_obsidian">Obsidian Dark</string>
     <string name="theme_amoled">AMOLED Black</string>
@@ -201,26 +201,26 @@
     <string name="nav_about">About</string>
 
     <!-- Plain-language descriptions for every setting -->
-    <string name="desc_presets">Max Stealth enables all defenses; Compatibility eases strict checks.</string>
-    <string name="desc_home_url">Opens on launch and Home tap (use about:blank for blank).</string>
-    <string name="desc_force_dark">Darkens bright websites automatically. Turn off if a site looks inverted or hard to read.</string>
-    <string name="desc_auto_clear_captures">Removes hidden in-app screenshots whenever you wipe the session.</string>
-    <string name="desc_confirm_wipe">Asks before clearing cookies, history, and cache so you do not wipe by mistake.</string>
-    <string name="desc_keep_screen_on">Prevents the screen from sleeping while reading long pages.</string>
-    <string name="desc_haptic">Short vibration when taking a screenshot or wiping the session.</string>
-    <string name="desc_show_status_bar">Shows a thin bar under the address field with blocked tracker count.</string>
-    <string name="desc_builtin_blocklist">Blocks known ad, analytics, and telemetry domains before they load.</string>
-    <string name="desc_block_webrtc">Prevents WebRTC from leaking your local Wi-Fi or VPN IP.</string>
-    <string name="desc_block_beacons">Blocks background pings sent when closing or leaving a page.</string>
-    <string name="desc_noise_canvas">Adds per-session noise to Canvas/WebGL to vary your fingerprint.</string>
-    <string name="desc_noise_audio">Adds noise to WebAudio output to block audio fingerprinting.</string>
-    <string name="desc_hide_visibility">Reports the tab as always active, hiding app switches.</string>
-    <string name="desc_lock_viewport">Blocks resize events to hide window geometry and keyboard height.</string>
-    <string name="desc_sensor_fallback">Returns neutral values instead of live motion/orientation sensors.</string>
-    <string name="desc_fuzz_perf">Rounds timers to 20 µs to hinder timing attacks.</string>
-    <string name="desc_jitter_enabled">Adds subtle idle micro-scrolls to mimic natural reading.</string>
-    <string name="desc_block_schemes">Blocks links like intent:// or tel: from launching other apps behind your back.</string>
-    <string name="desc_suppress_dialogs">Silences annoying alert/confirm/prompt popups from web pages.</string>
+    <string name="desc_presets">Max Stealth enables all shields; Compatibility eases them.</string>
+    <string name="desc_home_url">Use about:blank for blank.</string>
+    <string name="desc_force_dark">Darkens bright websites automatically.</string>
+    <string name="desc_auto_clear_captures">Removes hidden screenshots when wiping the session.</string>
+    <string name="desc_confirm_wipe">Asks before clearing session data.</string>
+    <string name="desc_keep_screen_on">Keeps the screen awake while reading.</string>
+    <string name="desc_haptic">Short vibration on captures and wipe.</string>
+    <string name="desc_show_status_bar">Shows blocked tracker count below the address bar.</string>
+    <string name="desc_builtin_blocklist">Blocks known ad and tracker domains.</string>
+    <string name="desc_block_webrtc">Hides your real IP from websites.</string>
+    <string name="desc_block_beacons">Blocks background tracking when leaving a page.</string>
+    <string name="desc_noise_canvas">Varies graphics fingerprint per session.</string>
+    <string name="desc_noise_audio">Varies audio fingerprint per session.</string>
+    <string name="desc_hide_visibility">Hides switching between tabs or apps.</string>
+    <string name="desc_lock_viewport">Hides window and keyboard dimensions.</string>
+    <string name="desc_sensor_fallback">Hides motion and gyroscope sensors.</string>
+    <string name="desc_fuzz_perf">Coarsens browser timers.</string>
+    <string name="desc_jitter_enabled">Subtle idle micro-scrolls against bot checks.</string>
+    <string name="desc_block_schemes">Prevents links from launching other apps.</string>
+    <string name="desc_suppress_dialogs">Silences alert/confirm/prompt popups.</string>
 
     <!-- Compatibility warning & Site Fixes placeholder -->
     <string name="compat_warn_title">Staying on Max Stealth is recommended</string>
@@ -238,20 +238,20 @@
     <string name="profile_delete_title">Delete profile "%1$s"?</string>
     <string name="profile_delete_btn">Delete</string>
     <string name="profiles_section_title">Custom profiles</string>
-    <string name="profiles_hint">Saves your switch setup. Long-press a profile to delete.</string>
+    <string name="profiles_hint">Long-press a profile to delete.</string>
 
     <!-- Custom search engine -->
     <string name="search_custom">Custom URL</string>
     <string name="pref_custom_search_template">Custom search URL template</string>
-    <string name="desc_custom_search_template" formatted="false">Use %s for the query (e.g. https://searx.be/search?q=%s).</string>
+    <string name="desc_custom_search_template" formatted="false">Use %s for the query.</string>
 
     <!-- VPN Kill-Switch -->
     <string name="nav_vpn">VPN</string>
     <string name="cat_vpn">VPN Kill-Switch</string>
     <string name="pref_vpn_kill_switch">Block requests without VPN</string>
-    <string name="desc_vpn_kill_switch">Blocks HTTP/HTTPS without an active VPN. For full socket protection, enable Always-on VPN in Android.</string>
-    <string name="pref_vpn_bypass_start">Open start page immediately</string>
-    <string name="desc_vpn_bypass_start">Opens start page immediately (network requests stay blocked until VPN connects).</string>
+    <string name="desc_vpn_kill_switch">For full system protection, enable Always-on VPN in Android.</string>
+    <string name="pref_vpn_check_start">Check VPN on launch</string>
+    <string name="desc_vpn_check_start">Turn off to open the start page immediately.</string>
 
     <string name="vpn_blocked_title">VPN is disconnected</string>
     <string name="vpn_blocked_body">VPN Kill-Switch is active. All page loads and network requests are blocked until a VPN tunnel connects.</string>
@@ -343,12 +343,12 @@
     <string name="fix_vpn_title">All pages blocked by VPN screen or 403 error (including local LAN)</string>
     <string name="fix_vpn_symptoms">Every site shows the "VPN is disconnected" overlay, or Orbot/SOCKS proxy traffic fails, or local router addresses (192.168.x.x) cannot be opened.</string>
     <string name="fix_vpn_cause">VPN Kill-Switch verifies that Android\'s active network has TRANSPORT_VPN. Local proxies without a VPN interface and LAN gateways without a tunnel are blocked.</string>
-    <string name="fix_vpn_fix">Connect a VPN app and tap "Check again", or temporarily turn off Settings → VPN → "Block requests without VPN". Note: "Open start page without waiting" only skips the startup check, not network blocking.</string>
+    <string name="fix_vpn_fix">Connect a VPN app and tap "Check again", or temporarily turn off Settings → VPN → "Block requests without VPN". Note: turning off "Check VPN on launch" only skips the startup check, not network blocking.</string>
 
     <string name="fix_render_title">Inverted colors, unreadable text, broken zoom, downloads, or search</string>
     <string name="fix_render_symptoms">Photos/logos look inverted or dark text sits on a dark background; cards overlap; PDF/file downloads do not start; typing words in the URL bar does not search.</string>
-    <string name="fix_render_cause">Force dark mode alters page CSS/images; high text zoom breaks rigid layouts; downloads are off by default for safety; search can be set to Off or an invalid Custom URL without %s.</string>
-    <string name="fix_render_fix" formatted="false">Settings → Everyday: turn off "Force dark mode", reset "Text zoom" to 100%, enable "Allow file downloads" when needed, or verify your Search Engine (Custom URL must include %s).</string>
+    <string name="fix_render_cause">Force dark mode alters page CSS/images; high text zoom breaks rigid layouts; downloads are blocked by default for safety; search can be set to Off or an invalid Custom URL without %s.</string>
+    <string name="fix_render_fix" formatted="false">Settings → Everyday: turn off "Force dark mode", reset "Text zoom" to 100%, turn off "Block downloads" when needed, or verify your Search Engine (Custom URL must include %s).</string>
 
     <string name="fix_session_title">Logged out after closing app or screenshots missing in Gallery</string>
     <string name="fix_session_symptoms">Every app restart signs you out of accounts and empties shopping carts; newly taken screenshots do not appear in the system Gallery.</string>
@@ -394,13 +394,14 @@
     <string name="pin_subtitle">Stealth Snake is locked</string>
     <string name="pin_hint">4–8 digit PIN</string>
     <string name="pin_unlock">Unlock</string>
-    <string name="pin_wrong">Incorrect PIN (%1$d attempts left before Wipe)</string>
+    <string name="pin_wrong">Incorrect PIN (%1$d attempts left before session wipe)</string>
     <string name="pin_wrong_simple">Incorrect PIN</string>
     <string name="pin_locked_out">Too many attempts. Try again in %1$d s.</string>
     <string name="pin_wiped">Too many failed attempts — session wiped</string>
     <string name="pin_setup_title">Set PIN lock</string>
     <string name="pin_setup_body">Choose a 4–8 digit PIN to lock the browser on launch and when returning from background.</string>
     <string name="pin_setup_invalid">PIN must be 4–8 digits</string>
+    <string name="pin_setup_error">Could not save PIN. Try again.</string>
     <string name="pin_saved">PIN lock enabled</string>
     <string name="pin_removed">PIN lock removed</string>
     <string name="pref_pin_set">Set / change PIN lock</string>
@@ -433,8 +434,8 @@
     <string name="btn_downloads">Downloads</string>
     <string name="downloads_title">Downloads &amp; Offline</string>
     <string name="downloads_clear_history">Clear list</string>
-    <string name="downloads_disabled_notice">File downloads are currently disabled in Settings. Enable them to save files from websites.</string>
-    <string name="downloads_enable_in_settings">Enable in Settings</string>
+    <string name="downloads_disabled_notice">File downloads are blocked in Settings. Turn off "Block downloads" to save files from websites.</string>
+    <string name="downloads_open_settings">Open Settings</string>
     <string name="downloads_section_files">Recent downloads</string>
     <string name="downloads_section_pages">Saved offline pages</string>
     <string name="downloads_empty_files">No downloaded files recorded yet.</string>
@@ -447,8 +448,8 @@
     <string name="external_scheme_message">A page wants to open \"%1$s\" in an external app. External apps are outside Stealth Snake\'s privacy sandbox.</string>
     <string name="external_scheme_open">Open app</string>
     <string name="external_scheme_no_app">No app installed for %1$s links</string>
-    <string name="renderer_crashed_notice">Web renderer crashed and was cleanly restarted</string>
-    <string name="file_upload_blocked_notice">File uploads are blocked in Stealth Snake\'s isolated sandbox</string>
+    <string name="renderer_crashed_notice">Page crashed and was restarted</string>
+    <string name="file_upload_blocked_notice">File uploads blocked. Change in Site compatibility</string>
     <string name="site_info_blocked_item">%1$s (%2$d)</string>
     <string name="captures_item_meta">%1$s · %2$s</string>
     <string name="downloads_item_meta">%1$s · %2$s · %3$s</string>
@@ -500,18 +501,18 @@
     <string name="site_info_snake_script_unsupported">Anti-fingerprinting scripts inactive (WebView lacks DOCUMENT_START_SCRIPT support)</string>
 
     <!-- Compatibility toggles, popups, uploads, errors, auth, bookmarks & UX controls -->
-    <string name="pref_allow_file_uploads">Allow sanitized file uploads</string>
-    <string name="pref_allow_file_uploads_desc">Allow &lt;input type="file"&gt; pickers via a private temporary copy (EXIF stripped from images, direct content:// URIs never exposed).</string>
-    <string name="pref_allow_oauth_popups">Allow modal login popups (OAuth / 3DS)</string>
-    <string name="pref_allow_oauth_popups_desc">Allow user-tapped window.open popups in an isolated modal child WebView carrying the current session protections. Disabled in Max Stealth.</string>
+    <string name="pref_block_file_uploads">Block file uploads</string>
+    <string name="pref_block_file_uploads_desc">When off, uploads strip photo metadata.</string>
+    <string name="pref_block_oauth_popups">Block login popups (OAuth / 3DS)</string>
+    <string name="pref_block_oauth_popups_desc">Google/social logins and bank 3DS checks.</string>
     <string name="downloads_open_warning_title">Open downloaded file in external app?</string>
     <string name="downloads_open_warning_message">File \"%1$s\" will be opened via a third-party app outside Stealth Snake\'s isolated sandbox. Verify you trust this file before opening.</string>
     <string name="downloads_open_failed">No compatible app found to open this file</string>
-    <string name="popup_blocked_notice">Popup blocked — enable Login Popups in Compatibility / Settings if needed for OAuth or 3DS</string>
+    <string name="popup_blocked_notice">Popup blocked. Change in Site compatibility</string>
     <string name="popup_window_title">Popup · %1$s</string>
     <string name="popup_window_close">Close popup</string>
-    <string name="file_upload_sanitize_failed">Failed to prepare file safely for upload</string>
-    <string name="file_upload_too_large">Selected file exceeds the 50 MB sanitized upload limit</string>
+    <string name="file_upload_sanitize_failed">Could not prepare file for upload</string>
+    <string name="file_upload_too_large">File exceeds the 50 MB upload limit</string>
     <string name="error_page_title">Page could not load</string>
     <string name="error_page_message">%1$s (%2$d)</string>
     <string name="error_page_retry">Retry</string>
@@ -530,7 +531,7 @@
     <string name="menu_share_url">Share URL</string>
     <string name="menu_print_pdf">Print / Save as PDF</string>
     <string name="menu_clear_site_data">Clear site data</string>
-    <string name="bookmark_added">Bookmark saved (encrypted locally)</string>
+    <string name="bookmark_added">Bookmark saved</string>
     <string name="bookmark_removed">Bookmark removed</string>
     <string name="bookmarks_title">Encrypted Bookmarks</string>
     <string name="bookmarks_empty">No bookmarks saved yet.</string>
@@ -540,7 +541,37 @@
     <string name="print_unavailable">Printing unavailable on this page</string>
     <string name="session_profile_label">Session protection profile</string>
     <string name="session_profile_default">Global default (%1$s)</string>
-    <string name="session_profile_switched">Session switched to %1$s (isolated &amp; re-seeded)</string>
+    <string name="session_profile_switched">Session switched to %1$s</string>
     <string name="fullscreen_rotate_desc">Rotate fullscreen video</string>
-    <string name="external_link_opened_new_session">Opened external link in a new isolated session</string>
+    <string name="external_link_opened_new_session">Opened in a new session</string>
+
+    <!-- Everyday -> Site compatibility -->
+    <string name="cat_hub_site_compat">Site compatibility</string>
+    <string name="hub_sub_site_compat">Logins, uploads, and broken sites</string>
+    <string name="compat_search_keywords">compatibility oauth login 3ds upload captcha broken site popup bank payment call webrtc</string>
+    <string name="subcat_compat_access">Logins &amp; uploads</string>
+    <string name="compat_hint_block_oauth_popups">Google/social logins and bank 3DS</string>
+    <string name="subcat_compat_shields">Site shields</string>
+    <string name="subcat_compat_network">Network &amp; app links</string>
+    <string name="compat_hint_noise_canvas">Captchas &amp; graphic editors</string>
+    <string name="compat_hint_hide_visibility">Chat alerts, auto-pause &amp; captchas</string>
+    <string name="compat_hint_lock_viewport">Keyboard overlap &amp; broken layout</string>
+    <string name="compat_hint_noise_audio">Sound glitches in players &amp; editors</string>
+    <string name="compat_hint_sensor_fallback">360° views, compass &amp; tilt</string>
+    <string name="compat_hint_fuzz_perf">Lagging animations, games &amp; speedtests</string>
+    <string name="compat_hint_jitter_enabled">Page twitching or closing menus</string>
+    <string name="compat_hint_suppress_dialogs">Unresponsive delete or logout buttons</string>
+    <string name="compat_hint_builtin_blocklist">Blocked checkout, login or widgets</string>
+    <string name="compat_hint_block_beacons">Lost drafts or stuck forms</string>
+    <string name="compat_hint_block_webrtc">Web calls &amp; peer-to-peer transfers</string>
+    <string name="compat_hint_block_schemes">Banking apps, payments &amp; tel links</string>
+    <string name="subcat_compat_links">Related sections</string>
+    <string name="compat_link_downloads">Downloads &amp; screenshots</string>
+    <string name="compat_link_downloads_sub">Block downloads: %1$s · Block screenshots: %2$s</string>
+    <string name="compat_link_wipe">Session &amp; auto-wipe</string>
+    <string name="compat_link_wipe_sub">Auto-wipe: %1$s</string>
+    <string name="compat_link_vpn">VPN &amp; network guard</string>
+    <string name="compat_link_vpn_sub">Kill-Switch: %1$s</string>
+    <string name="compat_link_blocking">Custom blocklist rules</string>
+    <string name="compat_link_blocking_sub">Blocklist: %1$s · Rules: %2$d</string>
 </resources>

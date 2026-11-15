@@ -72,8 +72,8 @@ data class SnakeProfile(
     val blockExternalSchemes: Boolean,
     val suppressJsDialogs: Boolean,
     val forceDarkPages: Boolean,
-    val allowFileUploads: Boolean = false,
-    val allowOAuthPopups: Boolean = false
+    val blockFileUploads: Boolean = true,
+    val blockOAuthPopups: Boolean = true
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -92,8 +92,8 @@ data class SnakeProfile(
         put("blockExternalSchemes", blockExternalSchemes)
         put("suppressJsDialogs", suppressJsDialogs)
         put("forceDarkPages", forceDarkPages)
-        put("allowFileUploads", allowFileUploads)
-        put("allowOAuthPopups", allowOAuthPopups)
+        put("blockFileUploads", blockFileUploads)
+        put("blockOAuthPopups", blockOAuthPopups)
     }
 
     companion object {
@@ -101,6 +101,16 @@ data class SnakeProfile(
             val id = obj.optString("id", "").trim()
             val name = obj.optString("name", "").trim()
             if (id.isEmpty() || name.isEmpty()) return null
+            val blockFileUploads = when {
+                obj.has("blockFileUploads") -> obj.optBoolean("blockFileUploads", true)
+                obj.has("allowFileUploads") -> !obj.optBoolean("allowFileUploads", false)
+                else -> true
+            }
+            val blockOAuthPopups = when {
+                obj.has("blockOAuthPopups") -> obj.optBoolean("blockOAuthPopups", true)
+                obj.has("allowOAuthPopups") -> !obj.optBoolean("allowOAuthPopups", false)
+                else -> true
+            }
             return SnakeProfile(
                 id = id,
                 name = name,
@@ -118,8 +128,8 @@ data class SnakeProfile(
                 blockExternalSchemes = obj.optBoolean("blockExternalSchemes", true),
                 suppressJsDialogs = obj.optBoolean("suppressJsDialogs", true),
                 forceDarkPages = obj.optBoolean("forceDarkPages", false),
-                allowFileUploads = obj.optBoolean("allowFileUploads", false),
-                allowOAuthPopups = obj.optBoolean("allowOAuthPopups", false)
+                blockFileUploads = blockFileUploads,
+                blockOAuthPopups = blockOAuthPopups
             )
         }
     }
@@ -133,6 +143,30 @@ class SnakePreferences(context: Context) {
 
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    init {
+        migrateLegacyPolarityIfNeeded()
+    }
+
+    private fun migrateLegacyPolarityIfNeeded() {
+        val migrations = arrayOf(
+            Triple(LEGACY_KEY_ALLOW_FILE_UPLOADS, KEY_BLOCK_FILE_UPLOADS, false),
+            Triple(LEGACY_KEY_ALLOW_OAUTH_POPUPS, KEY_BLOCK_OAUTH_POPUPS, false),
+            Triple(LEGACY_KEY_DOWNLOADS_ENABLED, KEY_BLOCK_DOWNLOADS, false),
+            Triple(LEGACY_KEY_VPN_BYPASS_START_CHECK, KEY_VPN_CHECK_START_PAGE, false)
+        )
+        var editor: SharedPreferences.Editor? = null
+        for ((legacyKey, newKey, legacyDefault) in migrations) {
+            if (prefs.contains(legacyKey)) {
+                val ed = editor ?: prefs.edit().also { editor = it }
+                if (!prefs.contains(newKey)) {
+                    ed.putBoolean(newKey, !prefs.getBoolean(legacyKey, legacyDefault))
+                }
+                ed.remove(legacyKey)
+            }
+        }
+        editor?.apply()
+    }
 
     var preset: ProtectionPreset
         get() = ProtectionPreset.fromKey(prefs.getString(KEY_PRESET, ProtectionPreset.MAX_STEALTH.key))
@@ -172,9 +206,9 @@ class SnakePreferences(context: Context) {
         get() = prefs.getBoolean(KEY_VPN_KILL_SWITCH, false)
         set(value) = prefs.edit().putBoolean(KEY_VPN_KILL_SWITCH, value).apply()
 
-    var vpnBypassStartCheck: Boolean
-        get() = prefs.getBoolean(KEY_VPN_BYPASS_START_CHECK, false)
-        set(value) = prefs.edit().putBoolean(KEY_VPN_BYPASS_START_CHECK, value).apply()
+    var vpnCheckStartPage: Boolean
+        get() = prefs.getBoolean(KEY_VPN_CHECK_START_PAGE, true)
+        set(value) = prefs.edit().putBoolean(KEY_VPN_CHECK_START_PAGE, value).apply()
 
     var forceDarkPages: Boolean
         get() = prefs.getBoolean(KEY_FORCE_DARK, false)
@@ -263,13 +297,13 @@ class SnakePreferences(context: Context) {
         get() = prefs.getBoolean(KEY_SUPPRESS_DIALOGS, true)
         set(value) = putBooleanAndMarkCustom(KEY_SUPPRESS_DIALOGS, value)
 
-    var allowFileUploads: Boolean
-        get() = prefs.getBoolean(KEY_ALLOW_FILE_UPLOADS, false)
-        set(value) = putBooleanAndMarkCustom(KEY_ALLOW_FILE_UPLOADS, value)
+    var blockFileUploads: Boolean
+        get() = prefs.getBoolean(KEY_BLOCK_FILE_UPLOADS, true)
+        set(value) = putBooleanAndMarkCustom(KEY_BLOCK_FILE_UPLOADS, value)
 
-    var allowOAuthPopups: Boolean
-        get() = prefs.getBoolean(KEY_ALLOW_OAUTH_POPUPS, false)
-        set(value) = putBooleanAndMarkCustom(KEY_ALLOW_OAUTH_POPUPS, value)
+    var blockOAuthPopups: Boolean
+        get() = prefs.getBoolean(KEY_BLOCK_OAUTH_POPUPS, true)
+        set(value) = putBooleanAndMarkCustom(KEY_BLOCK_OAUTH_POPUPS, value)
 
     // Session & UI
     var locale: SupportedLocale
@@ -315,6 +349,34 @@ class SnakePreferences(context: Context) {
         get() = prefs.getString(KEY_PIN_HASH, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_PIN_HASH, value).apply()
 
+    /** Atomically commits salt, hash, lock toggle, and lockout reset in a single disk sync. */
+    fun commitPinCredentials(salt: String, hash: String, enabled: Boolean) {
+        prefs.edit()
+            .putString(KEY_PIN_SALT, salt)
+            .putString(KEY_PIN_HASH, hash)
+            .putBoolean(KEY_PIN_LOCK_ENABLED, enabled)
+            .putInt(KEY_PIN_FAILED_ATTEMPTS, 0)
+            .putLong(KEY_PIN_LOCKOUT_STARTED_AT, 0L)
+            .putLong(KEY_PIN_LOCKOUT_UNTIL, 0L)
+            .putBoolean(KEY_PIN_AUTO_WIPE_PENDING, false)
+            .commit()
+    }
+
+    /**
+     * Atomically arms an uncompleted panic wipe on disk before UI teardown runs so configuration
+     * changes or process death mid-attempt cannot drop auto-wipe or reset the attempt counter for free.
+     */
+    fun commitAutoWipePending() {
+        prefs.edit()
+            .putBoolean(KEY_PIN_AUTO_WIPE_PENDING, true)
+            .putInt(KEY_PIN_FAILED_ATTEMPTS, 0)
+            .commit()
+    }
+
+    var pinAutoWipePending: Boolean
+        get() = prefs.getBoolean(KEY_PIN_AUTO_WIPE_PENDING, false)
+        set(value) { prefs.edit().putBoolean(KEY_PIN_AUTO_WIPE_PENDING, value).commit() }
+
     var pinAutoWipeOnFail: Boolean
         get() = prefs.getBoolean(KEY_PIN_AUTO_WIPE_ON_FAIL, true)
         set(value) = prefs.edit().putBoolean(KEY_PIN_AUTO_WIPE_ON_FAIL, value).apply()
@@ -351,9 +413,9 @@ class SnakePreferences(context: Context) {
         prefs.edit().putBoolean(KEY_USE_DYNAMIC_THEME, true).apply()
     }
 
-    var downloadsEnabled: Boolean
-        get() = prefs.getBoolean(KEY_DOWNLOADS_ENABLED, false)
-        set(value) = prefs.edit().putBoolean(KEY_DOWNLOADS_ENABLED, value).apply()
+    var blockDownloads: Boolean
+        get() = prefs.getBoolean(KEY_BLOCK_DOWNLOADS, true)
+        set(value) = prefs.edit().putBoolean(KEY_BLOCK_DOWNLOADS, value).apply()
 
     var sessionDirty: Boolean
         get() = prefs.getBoolean(KEY_SESSION_DIRTY, false)
@@ -381,7 +443,10 @@ class SnakePreferences(context: Context) {
 
     fun applyPreset(target: ProtectionPreset) {
         if (target == ProtectionPreset.CUSTOM) {
-            preset = ProtectionPreset.CUSTOM
+            prefs.edit()
+                .remove(KEY_ACTIVE_PROFILE_ID)
+                .putString(KEY_PRESET, ProtectionPreset.CUSTOM.key)
+                .apply()
             return
         }
         val max = (target == ProtectionPreset.MAX_STEALTH)
@@ -395,8 +460,8 @@ class SnakePreferences(context: Context) {
             .putBoolean(KEY_LOCK_VIEWPORT, max)
             .putBoolean(KEY_BLOCK_SCHEMES, true)
             .putBoolean(KEY_SUPPRESS_DIALOGS, true)
-            .putBoolean(KEY_ALLOW_FILE_UPLOADS, !max)
-            .putBoolean(KEY_ALLOW_OAUTH_POPUPS, !max)
+            .putBoolean(KEY_BLOCK_FILE_UPLOADS, max)
+            .putBoolean(KEY_BLOCK_OAUTH_POPUPS, max)
             // Compatibility mode relaxes aggressive canvas/audio/sensor/jitter/viewport locks for compatibility
             .putBoolean(KEY_NOISE_CANVAS, max)
             .putBoolean(KEY_NOISE_AUDIO, max)
@@ -459,8 +524,8 @@ class SnakePreferences(context: Context) {
             .putBoolean(KEY_BLOCK_SCHEMES, profile.blockExternalSchemes)
             .putBoolean(KEY_SUPPRESS_DIALOGS, profile.suppressJsDialogs)
             .putBoolean(KEY_FORCE_DARK, profile.forceDarkPages)
-            .putBoolean(KEY_ALLOW_FILE_UPLOADS, profile.allowFileUploads)
-            .putBoolean(KEY_ALLOW_OAUTH_POPUPS, profile.allowOAuthPopups)
+            .putBoolean(KEY_BLOCK_FILE_UPLOADS, profile.blockFileUploads)
+            .putBoolean(KEY_BLOCK_OAUTH_POPUPS, profile.blockOAuthPopups)
             .apply()
         return true
     }
@@ -493,8 +558,8 @@ class SnakePreferences(context: Context) {
         blockExternalSchemes = blockExternalSchemes,
         suppressJsDialogs = suppressJsDialogs,
         forceDarkPages = forceDarkPages,
-        allowFileUploads = allowFileUploads,
-        allowOAuthPopups = allowOAuthPopups
+        blockFileUploads = blockFileUploads,
+        blockOAuthPopups = blockOAuthPopups
     )
 
     private fun syncActiveProfileIfAny() {
@@ -519,27 +584,37 @@ class SnakePreferences(context: Context) {
     }
 
     fun resetToDefaults(preservePin: Boolean = false) {
-        val keepPin = preservePin && pinLockEnabled
-        val savedSalt = if (keepPin) pinSalt else ""
-        val savedHash = if (keepPin) pinHash else ""
-        val savedAutoWipe = if (keepPin) pinAutoWipeOnFail else true
-        val savedAttempts = if (keepPin) pinFailedAttempts else 0
-        val savedLockoutStart = if (keepPin) pinLockoutStartedAtMs else 0L
-        val savedLockoutUntil = if (keepPin) pinLockoutUntilMs else 0L
-        prefs.edit().clear().putBoolean(KEY_USE_DYNAMIC_THEME, true).apply()
-        if (keepPin) {
-            // Reset must not double as a brute-force counter / lockout reset.
-            prefs.edit()
-                .putBoolean(KEY_PIN_LOCK_ENABLED, true)
-                .putString(KEY_PIN_SALT, savedSalt)
-                .putString(KEY_PIN_HASH, savedHash)
-                .putBoolean(KEY_PIN_AUTO_WIPE_ON_FAIL, savedAutoWipe)
-                .putInt(KEY_PIN_FAILED_ATTEMPTS, savedAttempts)
-                .putLong(KEY_PIN_LOCKOUT_STARTED_AT, savedLockoutStart)
-                .putLong(KEY_PIN_LOCKOUT_UNTIL, savedLockoutUntil)
-                .apply()
-        } else {
-            PinLockCoordinator.onPinCleared()
+        synchronized(PinManager) {
+            val keepPin = preservePin && pinLockEnabled
+            val savedSalt = if (keepPin) pinSalt else ""
+            val savedHash = if (keepPin) pinHash else ""
+            val savedAutoWipe = if (keepPin) pinAutoWipeOnFail else true
+            val savedAttempts = if (keepPin) pinFailedAttempts else 0
+            val savedLockoutStart = if (keepPin) pinLockoutStartedAtMs else 0L
+            val savedLockoutUntil = if (keepPin) pinLockoutUntilMs else 0L
+            val savedAutoWipePending = if (keepPin) pinAutoWipePending else false
+
+            // Single atomic SharedPreferences commit avoids losing PIN/lockout keys on crash between
+            // clear() and restore.
+            val editor = prefs.edit()
+                .clear()
+                .putBoolean(KEY_USE_DYNAMIC_THEME, true)
+            if (keepPin) {
+                // Reset must not double as a brute-force counter / lockout reset.
+                editor
+                    .putBoolean(KEY_PIN_LOCK_ENABLED, true)
+                    .putString(KEY_PIN_SALT, savedSalt)
+                    .putString(KEY_PIN_HASH, savedHash)
+                    .putBoolean(KEY_PIN_AUTO_WIPE_ON_FAIL, savedAutoWipe)
+                    .putInt(KEY_PIN_FAILED_ATTEMPTS, savedAttempts)
+                    .putLong(KEY_PIN_LOCKOUT_STARTED_AT, savedLockoutStart)
+                    .putLong(KEY_PIN_LOCKOUT_UNTIL, savedLockoutUntil)
+                    .putBoolean(KEY_PIN_AUTO_WIPE_PENDING, savedAutoWipePending)
+            }
+            editor.commit()
+            if (!keepPin) {
+                PinLockCoordinator.onPinCleared()
+            }
         }
         applyLocale(SupportedLocale.EN)
     }
@@ -557,6 +632,7 @@ class SnakePreferences(context: Context) {
             .remove(KEY_PROFILES_JSON)
             .remove(KEY_ACTIVE_PROFILE_ID)
             .putBoolean(KEY_SESSION_DIRTY, false)
+            .putBoolean(KEY_PIN_AUTO_WIPE_PENDING, false)
             .commit() // panic wipe must hit disk even if the process is killed right after
     }
 
@@ -578,8 +654,8 @@ class SnakePreferences(context: Context) {
         val blockExternalSchemes: Boolean,
         val suppressJsDialogs: Boolean,
         val forceDarkPages: Boolean,
-        val allowFileUploads: Boolean,
-        val allowOAuthPopups: Boolean
+        val blockFileUploads: Boolean,
+        val blockOAuthPopups: Boolean
     ) {
         fun parsedCustomRules(): List<String> =
             BlocklistEngine.fromRules(customBlocklistRaw.lines()).rules
@@ -620,8 +696,8 @@ class SnakePreferences(context: Context) {
                 blockExternalSchemes = profile.blockExternalSchemes,
                 suppressJsDialogs = profile.suppressJsDialogs,
                 forceDarkPages = profile.forceDarkPages,
-                allowFileUploads = profile.allowFileUploads,
-                allowOAuthPopups = profile.allowOAuthPopups
+                blockFileUploads = profile.blockFileUploads,
+                blockOAuthPopups = profile.blockOAuthPopups
             )
         }
         val chosenPreset = presetOverride?.takeIf { it.isNotBlank() }?.let { ProtectionPreset.fromKey(it) }
@@ -642,8 +718,8 @@ class SnakePreferences(context: Context) {
                 blockExternalSchemes = true,
                 suppressJsDialogs = true,
                 forceDarkPages = forceDarkPages,
-                allowFileUploads = !max,
-                allowOAuthPopups = !max
+                blockFileUploads = max,
+                blockOAuthPopups = max
             )
         }
         return EffectivePolicy(
@@ -661,8 +737,8 @@ class SnakePreferences(context: Context) {
             blockExternalSchemes = blockExternalSchemes,
             suppressJsDialogs = suppressJsDialogs,
             forceDarkPages = forceDarkPages,
-            allowFileUploads = allowFileUploads,
-            allowOAuthPopups = allowOAuthPopups
+            blockFileUploads = blockFileUploads,
+            blockOAuthPopups = blockOAuthPopups
         )
     }
 
@@ -734,8 +810,10 @@ class SnakePreferences(context: Context) {
         private const val KEY_JITTER_MAX_SEC = "jitter_max_sec"
         private const val KEY_BLOCK_SCHEMES = "block_schemes"
         private const val KEY_SUPPRESS_DIALOGS = "suppress_dialogs"
-        private const val KEY_ALLOW_FILE_UPLOADS = "allow_file_uploads"
-        private const val KEY_ALLOW_OAUTH_POPUPS = "allow_oauth_popups"
+        private const val KEY_BLOCK_FILE_UPLOADS = "block_file_uploads"
+        private const val KEY_BLOCK_OAUTH_POPUPS = "block_oauth_popups"
+        private const val LEGACY_KEY_ALLOW_FILE_UPLOADS = "allow_file_uploads"
+        private const val LEGACY_KEY_ALLOW_OAUTH_POPUPS = "allow_oauth_popups"
         private const val KEY_LOCALE = "app_locale"
         private const val KEY_CONFIRM_WIPE = "confirm_wipe"
         private const val KEY_AUTO_WIPE_EXIT = "auto_wipe_exit"
@@ -744,23 +822,27 @@ class SnakePreferences(context: Context) {
         private const val KEY_SHOW_STATUS_BAR = "show_status_bar"
         private const val KEY_THEME_PALETTE = "theme_palette"
         private const val KEY_USE_DYNAMIC_THEME = "use_dynamic_theme"
-        private const val KEY_DOWNLOADS_ENABLED = "downloads_enabled"
+        private const val KEY_BLOCK_DOWNLOADS = "block_downloads"
+        private const val LEGACY_KEY_DOWNLOADS_ENABLED = "downloads_enabled"
         private const val KEY_START_HINT_DISMISSED = "start_hint_dismissed"
         private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_PROFILES_JSON = "custom_profiles_json"
         private const val KEY_ACTIVE_PROFILE_ID = "active_profile_id"
         private const val KEY_CUSTOM_SEARCH_TEMPLATE = "custom_search_template"
         private const val KEY_VPN_KILL_SWITCH = "vpn_kill_switch"
-        private const val KEY_VPN_BYPASS_START_CHECK = "vpn_bypass_start_check"
+        private const val KEY_VPN_CHECK_START_PAGE = "vpn_check_start_page"
+        private const val LEGACY_KEY_VPN_BYPASS_START_CHECK = "vpn_bypass_start_check"
         private const val KEY_SESSION_DIRTY = "session_dirty"
         private const val KEY_BLOCK_SCREENSHOTS = "block_screenshots"
+
         private const val KEY_PIN_LOCK_ENABLED = "pin_lock_enabled"
         private const val KEY_PIN_SALT = "pin_salt"
         private const val KEY_PIN_HASH = "pin_hash"
         private const val KEY_PIN_AUTO_WIPE_ON_FAIL = "pin_auto_wipe_on_fail"
+        private const val KEY_PIN_AUTO_WIPE_PENDING = "pin_auto_wipe_pending"
         private const val KEY_PIN_FAILED_ATTEMPTS = "pin_failed_attempts"
-    private const val KEY_PIN_LOCKOUT_STARTED_AT = "pin_lockout_started_at"
-    private const val KEY_PIN_LOCKOUT_UNTIL = "pin_lockout_until"
+        private const val KEY_PIN_LOCKOUT_STARTED_AT = "pin_lockout_started_at"
+        private const val KEY_PIN_LOCKOUT_UNTIL = "pin_lockout_until"
 
         fun applyLocale(locale: SupportedLocale) {
             val locales = if (locale == SupportedLocale.SYSTEM) {

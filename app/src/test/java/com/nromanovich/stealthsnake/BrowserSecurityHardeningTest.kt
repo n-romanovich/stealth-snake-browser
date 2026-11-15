@@ -185,7 +185,7 @@ class BrowserSecurityHardeningTest {
     fun `mainActivity preserves session across recreate and dismisses download dialog on destroy`() {
         val prefs = SnakePreferences(ctx).apply {
             autoWipeOnExit = true
-            downloadsEnabled = true
+            blockDownloads = false
             sessionDirty = true
         }
         val ctrl = Robolectric.buildActivity(MainActivity::class.java).setup()

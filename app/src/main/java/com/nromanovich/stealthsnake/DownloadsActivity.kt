@@ -58,7 +58,7 @@ class DownloadsActivity : AppCompatActivity() {
     private lateinit var clearBtn: Button
     private lateinit var bannerIcon: ImageView
     private lateinit var bannerMsgTv: TextView
-    private lateinit var bannerEnableBtn: Button
+    private lateinit var bannerSettingsBtn: Button
     private lateinit var disabledBanner: LinearLayout
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: DownloadsAdapter
@@ -198,8 +198,8 @@ class DownloadsActivity : AppCompatActivity() {
         disabledBanner.background = SnakeTheme.roundedSurface(tokens.cardSurface, Color.TRANSPARENT, 20f, density)
         bannerIcon.setColorFilter(tokens.primaryAccent, PorterDuff.Mode.SRC_IN)
         bannerMsgTv.setTextColor(tokens.textPrimary)
-        bannerEnableBtn.setTextColor(tokens.onPrimaryAccent)
-        bannerEnableBtn.background = SnakeTheme.pillRippleSurface(tokens.primaryAccent, rippleColor, 20f, density)
+        bannerSettingsBtn.setTextColor(tokens.onPrimaryAccent)
+        bannerSettingsBtn.background = SnakeTheme.pillRippleSurface(tokens.primaryAccent, rippleColor, 20f, density)
         adapter.notifyDataSetChanged()
     }
 
@@ -234,8 +234,8 @@ class DownloadsActivity : AppCompatActivity() {
         topRow.addView(bannerIcon)
         topRow.addView(bannerMsgTv)
 
-        bannerEnableBtn = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
-            text = getString(R.string.downloads_enable_in_settings)
+        bannerSettingsBtn = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+            text = getString(R.string.downloads_open_settings)
             isAllCaps = false
             textSize = 14f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -259,7 +259,7 @@ class DownloadsActivity : AppCompatActivity() {
             }
         }
         banner.addView(topRow)
-        banner.addView(bannerEnableBtn)
+        banner.addView(bannerSettingsBtn)
         return banner
     }
 
@@ -277,7 +277,7 @@ class DownloadsActivity : AppCompatActivity() {
     }
 
     private fun renderContent() {
-        disabledBanner.visibility = if (prefs.downloadsEnabled) View.GONE else View.VISIBLE
+        disabledBanner.visibility = if (prefs.blockDownloads) View.VISIBLE else View.GONE
         val gen = ++loadGeneration
         if (Build.FINGERPRINT.equals("robolectric", ignoreCase = true)) {
             renderLoadedContent(historyStore.list(), offlineManager.listPages())

@@ -35,6 +35,7 @@ import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.PathInterpolator
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckedTextView
@@ -51,6 +52,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.annotation.DrawableRes
+import androidx.annotation.StringRes
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
@@ -96,7 +98,16 @@ class SettingsActivity : AppCompatActivity() {
         val keywords: String,
         @DrawableRes val iconRes: Int?,
         val categoryId: String,
-        val targetView: View
+        val targetView: View?
+    )
+
+    private data class CompatToggleSpec(
+        val syncKey: String,
+        @StringRes val labelRes: Int,
+        @StringRes val descRes: Int?,
+        @DrawableRes val iconRes: Int? = null,
+        val getter: () -> Boolean,
+        val setter: (Boolean) -> Unit
     )
 
     internal class Android16Switch(
@@ -306,8 +317,16 @@ class SettingsActivity : AppCompatActivity() {
     private var cachedVersionName: String? = null
 
     private var activeCategoryId: String? = null
+    private val categoryBackStack = mutableListOf<String>()
+    private val scrollBackStack = mutableListOf<Int>()
     private val categoryContainers = mutableMapOf<String, LinearLayout>()
     private val categoryTitles = mutableMapOf<String, String>()
+    private var isSyncingControls: Boolean = false
+    private val switchSyncCallbacks = mutableMapOf<String, MutableList<(Boolean) -> Unit>>()
+    private val stepperSyncCallbacks = mutableMapOf<String, MutableList<() -> Unit>>()
+    private val jitterShapeSyncHooks = mutableListOf<(Boolean) -> Unit>()
+    private var compatRefreshHook: (() -> Unit)? = null
+    private var presetButtonsRefreshHook: (() -> Unit)? = null
     private val deferredUiHandler = Handler(Looper.getMainLooper())
     private var categoriesBuilt: Boolean = false
     private var deferredCategoryFrameCallback: Choreographer.FrameCallback? = null
@@ -505,13 +524,44 @@ class SettingsActivity : AppCompatActivity() {
         })
 
         // Survive process/config recreation without dumping the user back on the hub.
-        activeCategoryId = savedInstanceState?.getString(STATE_ACTIVE_CATEGORY)
+        hasScrolledInitialTarget = savedInstanceState?.getBoolean(STATE_INITIAL_TARGET_HANDLED, false) ?: false
+        val savedStack = savedInstanceState?.getStringArrayList(STATE_CATEGORY_STACK)
+        val savedScrolls = savedInstanceState?.getIntegerArrayList(STATE_SCROLL_STACK)
+        categoryBackStack.clear()
+        scrollBackStack.clear()
+        if (!savedStack.isNullOrEmpty()) {
+            categoryBackStack.addAll(savedStack)
+            savedStack.indices.forEach { idx ->
+                scrollBackStack.add(savedScrolls?.getOrNull(idx) ?: 0)
+            }
+        } else {
+            savedInstanceState?.getString(STATE_ACTIVE_CATEGORY)?.let { legacyCat ->
+                categoryBackStack.add(legacyCat)
+                scrollBackStack.add(0)
+            }
+        }
+        activeCategoryId = categoryBackStack.lastOrNull()
         buildSettingsUi()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.hasExtra(EXTRA_SCROLL_TO_SECTION)) {
+            hasScrolledInitialTarget = false
+            buildSettingsUi(preserveScroll = false)
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         flushTextInputs()
+        if (categoryBackStack.isNotEmpty() && scrollBackStack.size == categoryBackStack.size) {
+            scrollBackStack[scrollBackStack.lastIndex] = contentScroll.scrollY
+        }
         activeCategoryId?.let { outState.putString(STATE_ACTIVE_CATEGORY, it) }
+        outState.putStringArrayList(STATE_CATEGORY_STACK, ArrayList(categoryBackStack))
+        outState.putIntegerArrayList(STATE_SCROLL_STACK, ArrayList(scrollBackStack))
+        outState.putBoolean(STATE_INITIAL_TARGET_HANDLED, hasScrolledInitialTarget)
         super.onSaveInstanceState(outState)
     }
 
@@ -523,7 +573,6 @@ class SettingsActivity : AppCompatActivity() {
     private fun trackDialog(dialog: AlertDialog): AlertDialog {
         activeDialogs.removeAll { !it.isShowing }
         activeDialogs.add(dialog)
-        dialog.setOnDismissListener { activeDialogs.remove(dialog) }
         return dialog
     }
 
@@ -541,14 +590,61 @@ class SettingsActivity : AppCompatActivity() {
     private fun handleBackNavigation() {
         when {
             searchOverlay != null -> closeSearchOverlay()
-            activeCategoryId != null -> closeCategoryToHub()
+            categoryBackStack.size > 1 -> popCategory()
+            categoryBackStack.isNotEmpty() || contentScroll.visibility == View.VISIBLE -> closeCategoryToHub()
             else -> finish()
         }
     }
 
+    private fun showCategorySurface(categoryId: String, refreshDerived: Boolean = true) {
+        if (refreshDerived) {
+            refreshDerivedUiState()
+        }
+        activeCategoryId = categoryId
+        hubScroll.visibility = View.GONE
+        contentScroll.visibility = View.VISIBLE
+        contentScroll.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+
+        for ((id, catContainer) in categoryContainers) {
+            catContainer.visibility = if (id == categoryId) View.VISIBLE else View.GONE
+        }
+        titleView.text = categoryTitles[categoryId] ?: getString(R.string.settings_title)
+    }
+
+    private fun animateCategoryTransition(forward: Boolean) {
+        val density = resources.displayMetrics.density
+        val contentOffset = (if (forward) 24f else -20f) * density
+        val titleOffset = (if (forward) 10f else -10f) * density
+        val duration = if (forward) 220L else 180L
+
+        contentScroll.animate().cancel()
+        contentScroll.alpha = 0f
+        contentScroll.translationX = contentOffset
+        contentScroll.animate()
+            .alpha(1f)
+            .translationX(0f)
+            .setDuration(duration)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+
+        titleView.animate().cancel()
+        titleView.alpha = 0.35f
+        titleView.translationX = titleOffset
+        titleView.animate()
+            .alpha(1f)
+            .translationX(0f)
+            .setDuration(180L)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
     private fun openCategory(categoryId: String, targetView: View? = null) {
         if (categoryId == CAT_ABOUT) {
-            if (activeCategoryId != null) closeCategoryToHub()
+            categoryBackStack.clear()
+            scrollBackStack.clear()
+            if (activeCategoryId != null || contentScroll.visibility == View.VISIBLE) {
+                closeCategoryToHub()
+            }
             if (targetView != null) {
                 val density = resources.displayMetrics.density
                 hubScroll.post {
@@ -561,37 +657,17 @@ class SettingsActivity : AppCompatActivity() {
         }
         ensureCategoriesBuilt()
         categoryContainers[categoryId] ?: return
-        activeCategoryId = categoryId
-        hubScroll.visibility = View.GONE
-        contentScroll.visibility = View.VISIBLE
-        contentScroll.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
-
-        for ((id, catContainer) in categoryContainers) {
-            catContainer.visibility = if (id == categoryId) View.VISIBLE else View.GONE
+        categoryBackStack.clear()
+        scrollBackStack.clear()
+        categoryBackStack.add(categoryId)
+        scrollBackStack.add(0)
+        showCategorySurface(categoryId)
+        if (targetView == null) {
+            contentScroll.scrollTo(0, 0)
         }
-        titleView.text = categoryTitles[categoryId] ?: getString(R.string.settings_title)
+        animateCategoryTransition(forward = true)
 
         val density = resources.displayMetrics.density
-        contentScroll.animate().cancel()
-        contentScroll.alpha = 0f
-        contentScroll.translationX = 24f * density
-        contentScroll.animate()
-            .alpha(1f)
-            .translationX(0f)
-            .setDuration(220L)
-            .setInterpolator(DecelerateInterpolator())
-            .start()
-
-        titleView.animate().cancel()
-        titleView.alpha = 0.35f
-        titleView.translationX = 10f * density
-        titleView.animate()
-            .alpha(1f)
-            .translationX(0f)
-            .setDuration(180L)
-            .setInterpolator(DecelerateInterpolator())
-            .start()
-
         contentScroll.post {
             if (targetView != null) {
                 val y = computeRelativeTop(targetView, container)
@@ -603,11 +679,78 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun pushSubCategory(categoryId: String) {
+        if (categoryId == CAT_ABOUT) {
+            openCategory(CAT_ABOUT)
+            return
+        }
+        flushTextInputs()
+        ensureCategoriesBuilt()
+        categoryContainers[categoryId] ?: return
+        if (categoryBackStack.lastOrNull() == categoryId) return
+        if (categoryBackStack.isEmpty()) {
+            openCategory(categoryId)
+            return
+        }
+        if (scrollBackStack.size == categoryBackStack.size) {
+            scrollBackStack[scrollBackStack.lastIndex] = contentScroll.scrollY
+        }
+        categoryBackStack.add(categoryId)
+        scrollBackStack.add(0)
+        showCategorySurface(categoryId)
+        contentScroll.scrollTo(0, 0)
+        animateCategoryTransition(forward = true)
+        contentScroll.post { contentScroll.scrollTo(0, 0) }
+    }
+
+    private fun popCategory() {
+        if (categoryBackStack.size <= 1) {
+            closeCategoryToHub()
+            return
+        }
+        flushTextInputs()
+        activeHighlightAnimator?.cancel()
+        highlightedDrawableRestore?.invoke()
+        highlightedDrawableRestore = null
+        categoryBackStack.removeAt(categoryBackStack.lastIndex)
+        if (scrollBackStack.size > categoryBackStack.size) {
+            scrollBackStack.removeAt(scrollBackStack.lastIndex)
+        }
+        val parentId = categoryBackStack.lastOrNull()
+        if (parentId == null || parentId !in categoryContainers) {
+            closeCategoryToHub()
+            return
+        }
+        val restoredScrollY = scrollBackStack.lastOrNull() ?: 0
+        showCategorySurface(parentId)
+        contentScroll.scrollTo(0, restoredScrollY)
+        animateCategoryTransition(forward = false)
+        contentScroll.post { contentScroll.scrollTo(0, restoredScrollY) }
+    }
+
+    private fun restoreCategoryOnRebuild(categoryId: String, targetScrollY: Int) {
+        if (categoryId !in categoryContainers) {
+            closeCategoryToHub()
+            return
+        }
+        showCategorySurface(categoryId, refreshDerived = false)
+        contentScroll.scrollTo(0, targetScrollY)
+        contentScroll.animate().cancel()
+        contentScroll.alpha = 1f
+        contentScroll.translationX = 0f
+        titleView.animate().cancel()
+        titleView.alpha = 1f
+        titleView.translationX = 0f
+        contentScroll.post { contentScroll.scrollTo(0, targetScrollY) }
+    }
+
     private fun closeCategoryToHub() {
         flushTextInputs()
         activeHighlightAnimator?.cancel()
         highlightedDrawableRestore?.invoke()
         highlightedDrawableRestore = null
+        categoryBackStack.clear()
+        scrollBackStack.clear()
         activeCategoryId = null
         // Hide the detail scroll immediately before updating the Hub so hidden categories never
         // relayout on screen or bleed through while transitioning back.
@@ -786,6 +929,12 @@ class SettingsActivity : AppCompatActivity() {
         categoryContainers.clear()
         categoryTitles.clear()
         searchEntries.clear()
+        isSyncingControls = false
+        switchSyncCallbacks.clear()
+        stepperSyncCallbacks.clear()
+        jitterShapeSyncHooks.clear()
+        compatRefreshHook = null
+        presetButtonsRefreshHook = null
         container.removeAllViews()
         homeUrlInput = null
         customSearchInput = null
@@ -793,11 +942,11 @@ class SettingsActivity : AppCompatActivity() {
         cancelDeferredCategoriesBuild()
         categoriesBuilt = false
 
-        // Build lightweight top-level Hub cards first so Frame 1 renders without waiting on 9 hidden category trees.
+        // Build lightweight top-level Hub cards first so Frame 1 renders without waiting on hidden category trees.
         buildHubCards(colors, density, profiles)
 
         val targetSectionKey = if (!hasScrolledInitialTarget) intent.getStringExtra(EXTRA_SCROLL_TO_SECTION) else null
-        if (targetSectionKey != null || activeCategoryId != null || searchOverlay != null) {
+        if (targetSectionKey != null || categoryBackStack.isNotEmpty() || searchOverlay != null) {
             ensureCategoriesBuilt()
             val targetCategoryId = targetSectionKey?.let { sectionCategoryByKey[it] }
             if (targetCategoryId != null && targetCategoryId in categoryContainers) {
@@ -808,13 +957,13 @@ class SettingsActivity : AppCompatActivity() {
                 openCategory(targetCategoryId, sectionTargetViewByKey[targetSectionKey])
             } else {
                 hasScrolledInitialTarget = true
-                val currentCat = activeCategoryId
+                val currentCat = categoryBackStack.lastOrNull()
                 if (currentCat != null && currentCat in categoryContainers) {
-                    openCategory(currentCat)
-                    if (preserveScroll) {
-                        contentScroll.post { contentScroll.scrollTo(0, previousScrollY) }
-                    }
+                    val targetScrollY = if (preserveScroll) previousScrollY else (scrollBackStack.lastOrNull() ?: 0)
+                    restoreCategoryOnRebuild(currentCat, targetScrollY)
                 } else {
+                    categoryBackStack.clear()
+                    scrollBackStack.clear()
                     activeCategoryId = null
                     hubScroll.visibility = View.VISIBLE
                     contentScroll.visibility = View.GONE
@@ -827,6 +976,8 @@ class SettingsActivity : AppCompatActivity() {
             }
         } else {
             hasScrolledInitialTarget = true
+            categoryBackStack.clear()
+            scrollBackStack.clear()
             activeCategoryId = null
             hubScroll.visibility = View.VISIBLE
             contentScroll.visibility = View.GONE
@@ -968,6 +1119,7 @@ class SettingsActivity : AppCompatActivity() {
             presetRow.addView(addProfileBtn)
             rightCol.addView(presetRow)
 
+            val profileButtons = mutableListOf<Pair<String, MaterialButton>>()
             if (profiles.isNotEmpty()) {
                 rightCol.addView(TextView(this).apply {
                     text = getString(R.string.profiles_section_title)
@@ -1006,6 +1158,7 @@ class SettingsActivity : AppCompatActivity() {
                                 true
                             }
                         }
+                        profileButtons.add(profile.id to pBtn)
                         if (idx > 0) {
                             (pBtn.layoutParams as LinearLayout.LayoutParams).marginStart = (6 * density).toInt()
                         }
@@ -1024,6 +1177,15 @@ class SettingsActivity : AppCompatActivity() {
                     setTextColor(colors.subtitleText)
                     setPadding(0, (4 * density).toInt(), 0, 0)
                 })
+            }
+            presetButtonsRefreshHook = {
+                val nowPreset = prefs.preset
+                val nowProfileId = prefs.activeProfileId
+                applyPresetButtonStyle(maxBtn, nowProfileId == null && nowPreset == ProtectionPreset.MAX_STEALTH, colors, density)
+                applyPresetButtonStyle(compatBtn, nowProfileId == null && nowPreset == ProtectionPreset.COMPATIBILITY, colors, density)
+                profileButtons.forEach { (id, btn) ->
+                    applyPresetButtonStyle(btn, nowProfileId == id, colors, density)
+                }
             }
 
             presetCard.addView(rightCol)
@@ -1091,6 +1253,7 @@ class SettingsActivity : AppCompatActivity() {
             customSearchCard = customCard
             customSearchInput = customEt
             customSearchCard.visibility = if (prefs.searchEngine == SearchEngine.CUSTOM) View.VISIBLE else View.GONE
+            registerSearchEntry(getString(R.string.pref_custom_search_template), cat2Title, null, CAT_SEARCH_HOME, customSearchCard)
 
             refreshGroupShapes(group, colors, density)
             enableGroupLayoutTransition(group)
@@ -1164,7 +1327,13 @@ class SettingsActivity : AppCompatActivity() {
 
             addSubheader(section, colors, density, getString(R.string.subcat_display))
             val groupDisplay = createCardGroup(section)
-            val forceDarkCard = addSwitchCard(groupDisplay, colors, density, getString(R.string.pref_force_dark), prefs.forceDarkPages) {
+            val forceDarkCard = addSwitchCard(
+                parent = groupDisplay,
+                colors = colors,
+                density = density,
+                label = getString(R.string.pref_force_dark),
+                checked = prefs.forceDarkPages
+            ) {
                 prefs.forceDarkPages = it
             }
             registerSearchEntry(getString(R.string.pref_force_dark), cat3Title, null, CAT_APPEARANCE, forceDarkCard)
@@ -1273,10 +1442,10 @@ class SettingsActivity : AppCompatActivity() {
         val cat6Title = getString(R.string.cat_hub_downloads)
         val cat6Section = buildCategoryContainer(CAT_DOWNLOADS, cat6Title) { section ->
             val dlGroup = createCardGroup(section, topGapDp = 6f)
-            val dlCard = addSwitchCard(dlGroup, colors, density, getString(R.string.pref_downloads_enabled), prefs.downloadsEnabled, getString(R.string.pref_downloads_hint), iconRes = R.drawable.ic_settings_downloads) {
-                prefs.downloadsEnabled = it
+            val dlCard = addSwitchCard(dlGroup, colors, density, getString(R.string.pref_block_downloads), prefs.blockDownloads, getString(R.string.pref_block_downloads_hint), iconRes = R.drawable.ic_settings_downloads) {
+                prefs.blockDownloads = it
             }
-            registerSearchEntry(getString(R.string.pref_downloads_enabled), cat6Title, R.drawable.ic_settings_downloads, CAT_DOWNLOADS, dlCard)
+            registerSearchEntry(getString(R.string.pref_block_downloads), cat6Title, R.drawable.ic_settings_downloads, CAT_DOWNLOADS, dlCard)
             refreshGroupShapes(dlGroup, colors, density)
 
             addSubheader(section, colors, density, getString(R.string.subcat_captures))
@@ -1321,7 +1490,7 @@ class SettingsActivity : AppCompatActivity() {
         val cat7Title = getString(R.string.cat_hub_vpn)
         val cat7Section = buildCategoryContainer(CAT_VPN, cat7Title) { section ->
             val vpnGroup = createCardGroup(section, topGapDp = 6f)
-            lateinit var bypassCard: View
+            lateinit var vpnCheckStartCard: View
             val vpnCard = addSwitchCard(
                 parent = vpnGroup,
                 colors = colors,
@@ -1332,27 +1501,42 @@ class SettingsActivity : AppCompatActivity() {
                 iconRes = R.drawable.ic_settings_vpn
             ) { enabled ->
                 prefs.vpnKillSwitchEnabled = enabled
-                bypassCard.visibility = if (enabled) View.VISIBLE else View.GONE
+                vpnCheckStartCard.visibility = if (enabled) View.VISIBLE else View.GONE
                 refreshGroupShapes(vpnGroup, colors, density)
             }
             registerSearchEntry(getString(R.string.pref_vpn_kill_switch), cat7Title, R.drawable.ic_settings_vpn, CAT_VPN, vpnCard)
 
-            bypassCard = addSwitchCard(vpnGroup, colors, density, getString(R.string.pref_vpn_bypass_start), prefs.vpnBypassStartCheck, getString(R.string.desc_vpn_bypass_start)) {
-                prefs.vpnBypassStartCheck = it
+            vpnCheckStartCard = addSwitchCard(vpnGroup, colors, density, getString(R.string.pref_vpn_check_start), prefs.vpnCheckStartPage, getString(R.string.desc_vpn_check_start)) {
+                prefs.vpnCheckStartPage = it
             }
-            bypassCard.visibility = if (prefs.vpnKillSwitchEnabled) View.VISIBLE else View.GONE
-            registerSearchEntry(getString(R.string.pref_vpn_bypass_start), cat7Title, null, CAT_VPN, bypassCard)
+            vpnCheckStartCard.visibility = if (prefs.vpnKillSwitchEnabled) View.VISIBLE else View.GONE
+            registerSearchEntry(getString(R.string.pref_vpn_check_start), cat7Title, null, CAT_VPN, vpnCheckStartCard)
             refreshGroupShapes(vpnGroup, colors, density)
             enableGroupLayoutTransition(vpnGroup)
 
             addSubheader(section, colors, density, getString(R.string.cat_network), topDp = 18f)
             val netExtraGroup = createCardGroup(section, topGapDp = 0f)
-            val webrtcCard = addSwitchCard(netExtraGroup, colors, density, getString(R.string.pref_block_webrtc), prefs.blockWebRtcIce, getString(R.string.desc_block_webrtc)) {
+            val webrtcCard = addSwitchCard(
+                parent = netExtraGroup,
+                colors = colors,
+                density = density,
+                label = getString(R.string.pref_block_webrtc),
+                checked = prefs.blockWebRtcIce,
+                description = getString(R.string.desc_block_webrtc),
+                syncKey = SYNC_BLOCK_WEBRTC
+            ) {
                 prefs.blockWebRtcIce = it
             }
             registerSearchEntry(getString(R.string.pref_block_webrtc), cat7Title, null, CAT_VPN, webrtcCard)
 
-            val schemesCard = addSwitchCard(netExtraGroup, colors, density, getString(R.string.pref_block_schemes), prefs.blockExternalSchemes) {
+            val schemesCard = addSwitchCard(
+                parent = netExtraGroup,
+                colors = colors,
+                density = density,
+                label = getString(R.string.pref_block_schemes),
+                checked = prefs.blockExternalSchemes,
+                syncKey = SYNC_BLOCK_SCHEMES
+            ) {
                 prefs.blockExternalSchemes = it
             }
             registerSearchEntry(getString(R.string.pref_block_schemes), cat7Title, null, CAT_VPN, schemesCard)
@@ -1364,12 +1548,28 @@ class SettingsActivity : AppCompatActivity() {
         val cat8Title = getString(R.string.cat_hub_blocking)
         buildCategoryContainer(CAT_BLOCKING, cat8Title) { section ->
             val blockGroup = createCardGroup(section, topGapDp = 6f)
-            val builtinCard = addSwitchCard(blockGroup, colors, density, getString(R.string.pref_builtin_blocklist), prefs.builtinBlocklistEnabled, iconRes = R.drawable.ic_chrome_tune) {
+            val builtinCard = addSwitchCard(
+                parent = blockGroup,
+                colors = colors,
+                density = density,
+                label = getString(R.string.pref_builtin_blocklist),
+                checked = prefs.builtinBlocklistEnabled,
+                iconRes = R.drawable.ic_settings_block,
+                syncKey = SYNC_BUILTIN_BLOCKLIST
+            ) {
                 prefs.builtinBlocklistEnabled = it
             }
-            registerSearchEntry(getString(R.string.pref_builtin_blocklist), cat8Title, R.drawable.ic_chrome_tune, CAT_BLOCKING, builtinCard)
+            registerSearchEntry(getString(R.string.pref_builtin_blocklist), cat8Title, R.drawable.ic_settings_block, CAT_BLOCKING, builtinCard)
 
-            val beaconsCard = addSwitchCard(blockGroup, colors, density, getString(R.string.pref_block_beacons), prefs.blockBeacons, getString(R.string.desc_block_beacons)) {
+            val beaconsCard = addSwitchCard(
+                parent = blockGroup,
+                colors = colors,
+                density = density,
+                label = getString(R.string.pref_block_beacons),
+                checked = prefs.blockBeacons,
+                description = getString(R.string.desc_block_beacons),
+                syncKey = SYNC_BLOCK_BEACONS
+            ) {
                 prefs.blockBeacons = it
             }
             registerSearchEntry(getString(R.string.pref_block_beacons), cat8Title, null, CAT_BLOCKING, beaconsCard)
@@ -1394,11 +1594,11 @@ class SettingsActivity : AppCompatActivity() {
         val cat9Title = getString(R.string.cat_hub_antifp)
         val cat9Section = buildCategoryContainer(CAT_ANTIFP, cat9Title) { section ->
             val fpGroup = createCardGroup(section, topGapDp = 6f)
-            val canvasCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_noise_canvas), prefs.noiseCanvasWebgl, getString(R.string.desc_noise_canvas), iconRes = R.drawable.ic_snake_minimal) { prefs.noiseCanvasWebgl = it }
-            val audioCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_noise_audio), prefs.noiseAudio, getString(R.string.desc_noise_audio)) { prefs.noiseAudio = it }
-            val vpCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_lock_viewport), prefs.lockViewport, getString(R.string.desc_lock_viewport)) { prefs.lockViewport = it }
-            val sensorCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_sensor_fallback), prefs.sensorFallback, getString(R.string.desc_sensor_fallback)) { prefs.sensorFallback = it }
-            val perfCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_fuzz_perf), prefs.fuzzPerformanceNow, getString(R.string.desc_fuzz_perf)) { prefs.fuzzPerformanceNow = it }
+            val canvasCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_noise_canvas), prefs.noiseCanvasWebgl, getString(R.string.desc_noise_canvas), iconRes = R.drawable.ic_settings_stealth, syncKey = SYNC_NOISE_CANVAS) { prefs.noiseCanvasWebgl = it }
+            val audioCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_noise_audio), prefs.noiseAudio, getString(R.string.desc_noise_audio), syncKey = SYNC_NOISE_AUDIO) { prefs.noiseAudio = it }
+            val vpCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_lock_viewport), prefs.lockViewport, getString(R.string.desc_lock_viewport), syncKey = SYNC_LOCK_VIEWPORT) { prefs.lockViewport = it }
+            val sensorCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_sensor_fallback), prefs.sensorFallback, getString(R.string.desc_sensor_fallback), syncKey = SYNC_SENSOR_FALLBACK) { prefs.sensorFallback = it }
+            val perfCard = addSwitchCard(fpGroup, colors, density, getString(R.string.pref_fuzz_perf), prefs.fuzzPerformanceNow, getString(R.string.desc_fuzz_perf), syncKey = SYNC_FUZZ_PERF) { prefs.fuzzPerformanceNow = it }
             registerSearchEntry(getString(R.string.pref_noise_canvas), cat9Title, R.drawable.ic_settings_stealth, CAT_ANTIFP, canvasCard)
             registerSearchEntry(getString(R.string.pref_noise_audio), cat9Title, null, CAT_ANTIFP, audioCard)
             registerSearchEntry(getString(R.string.pref_lock_viewport), cat9Title, null, CAT_ANTIFP, vpCard)
@@ -1408,20 +1608,15 @@ class SettingsActivity : AppCompatActivity() {
 
             addSubheader(section, colors, density, getString(R.string.subcat_behavior))
             val behGroup = createCardGroup(section)
-            val visCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_hide_visibility), prefs.hideVisibilityFocus, getString(R.string.desc_hide_visibility)) { prefs.hideVisibilityFocus = it }
-            val dialogsCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_suppress_dialogs), prefs.suppressJsDialogs) { prefs.suppressJsDialogs = it }
-            val uploadsCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_allow_file_uploads), prefs.allowFileUploads, getString(R.string.pref_allow_file_uploads_desc)) { prefs.allowFileUploads = it }
-            val oauthPopupsCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_allow_oauth_popups), prefs.allowOAuthPopups, getString(R.string.pref_allow_oauth_popups_desc)) { prefs.allowOAuthPopups = it }
+            val visCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_hide_visibility), prefs.hideVisibilityFocus, getString(R.string.desc_hide_visibility), syncKey = SYNC_HIDE_VISIBILITY) { prefs.hideVisibilityFocus = it }
+            val dialogsCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_suppress_dialogs), prefs.suppressJsDialogs, syncKey = SYNC_SUPPRESS_DIALOGS) { prefs.suppressJsDialogs = it }
+            val uploadsCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_block_file_uploads), prefs.blockFileUploads, getString(R.string.pref_block_file_uploads_desc), syncKey = SYNC_BLOCK_FILE_UPLOADS) { prefs.blockFileUploads = it }
+            val oauthPopupsCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_block_oauth_popups), prefs.blockOAuthPopups, getString(R.string.pref_block_oauth_popups_desc), syncKey = SYNC_BLOCK_OAUTH_POPUPS) { prefs.blockOAuthPopups = it }
             lateinit var minJitterCard: View
             lateinit var maxJitterCard: View
-            val jitterCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_jitter_enabled), prefs.microJitterEnabled, getString(R.string.desc_jitter_enabled)) { enabled ->
+            val jitterCard = addSwitchCard(behGroup, colors, density, getString(R.string.pref_jitter_enabled), prefs.microJitterEnabled, getString(R.string.desc_jitter_enabled), syncKey = SYNC_JITTER_ENABLED) { enabled ->
                 prefs.microJitterEnabled = enabled
-                val vis = if (enabled) View.VISIBLE else View.GONE
-                minJitterCard.visibility = vis
-                maxJitterCard.visibility = vis
-                refreshGroupShapes(behGroup, colors, density)
             }
-            var maxValueView: TextView? = null
             val (minCard, _) = addDelayStepperCard(
                 parent = behGroup,
                 colors = colors,
@@ -1431,13 +1626,12 @@ class SettingsActivity : AppCompatActivity() {
                 minLimit = 5,
                 maxLimit = 60,
                 valueProvider = { prefs.microJitterMinSec },
-                onChanged = { newMin ->
-                    prefs.microJitterMinSec = newMin
-                    maxValueView?.text = getString(R.string.jitter_seconds_format, prefs.microJitterMaxSec)
-                }
+                syncKey = SYNC_JITTER_MIN,
+                syncKeysToRefresh = listOf(SYNC_JITTER_MIN, SYNC_JITTER_MAX),
+                onChanged = { newMin -> prefs.microJitterMinSec = newMin }
             )
             minJitterCard = minCard
-            val (maxCard, maxTv) = addDelayStepperCard(
+            val (maxCard, _) = addDelayStepperCard(
                 parent = behGroup,
                 colors = colors,
                 density = density,
@@ -1446,22 +1640,33 @@ class SettingsActivity : AppCompatActivity() {
                 minLimit = 5,
                 maxLimit = 90,
                 valueProvider = { prefs.microJitterMaxSec },
+                syncKey = SYNC_JITTER_MAX,
+                syncKeysToRefresh = listOf(SYNC_JITTER_MIN, SYNC_JITTER_MAX),
                 onChanged = { newMax -> prefs.microJitterMaxSec = newMax }
             )
             maxJitterCard = maxCard
-            maxValueView = maxTv
+            val updateJitterCards: (Boolean) -> Unit = { enabled ->
+                val vis = if (enabled) View.VISIBLE else View.GONE
+                minJitterCard.visibility = vis
+                maxJitterCard.visibility = vis
+                refreshGroupShapes(behGroup, colors, density)
+            }
+            jitterShapeSyncHooks.add(updateJitterCards)
             val jVis = if (prefs.microJitterEnabled) View.VISIBLE else View.GONE
             minJitterCard.visibility = jVis
             maxJitterCard.visibility = jVis
             registerSearchEntry(getString(R.string.pref_hide_visibility), cat9Title, null, CAT_ANTIFP, visCard)
             registerSearchEntry(getString(R.string.pref_suppress_dialogs), cat9Title, null, CAT_ANTIFP, dialogsCard)
-            registerSearchEntry(getString(R.string.pref_allow_file_uploads), cat9Title, null, CAT_ANTIFP, uploadsCard)
-            registerSearchEntry(getString(R.string.pref_allow_oauth_popups), cat9Title, null, CAT_ANTIFP, oauthPopupsCard)
+            registerSearchEntry(getString(R.string.pref_block_file_uploads), cat9Title, null, CAT_ANTIFP, uploadsCard)
+            registerSearchEntry(getString(R.string.pref_block_oauth_popups), cat9Title, null, CAT_ANTIFP, oauthPopupsCard)
             registerSearchEntry(getString(R.string.pref_jitter_enabled), cat9Title, null, CAT_ANTIFP, jitterCard)
             refreshGroupShapes(behGroup, colors, density)
             enableGroupLayoutTransition(behGroup)
         }
         registerCompatNavItem(getString(R.string.nav_antifp), CAT_ANTIFP, cat9Section, palette)
+
+        // CAT 10 (built last to preserve existing container DFS test order): Everyday -> Site compatibility
+        buildCompatibilityCategory(colors, density)
 
         if (navItems.isNotEmpty() && container.childCount > 0 && selectedNavItem == null) {
             selectNavItem(navItems.first(), container.getChildAt(0), palette, programmatic = false)
@@ -1514,6 +1719,7 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
         addHubCategoryCard(everydayGroup, colors, density, getString(R.string.cat_hub_appearance), "$themeName · ${prefs.textZoomPercent}%", R.drawable.ic_settings_palette, CAT_APPEARANCE)
+        addHubCategoryCard(everydayGroup, colors, density, getString(R.string.cat_hub_site_compat), getString(R.string.hub_sub_site_compat), R.drawable.ic_chrome_tune, CAT_COMPATIBILITY)
         refreshGroupShapes(everydayGroup, colors, density)
 
         // Block 2: Privacy, Access & Files
@@ -1528,7 +1734,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val dlSub = getString(
             R.string.hub_sub_downloads,
-            if (prefs.downloadsEnabled) onShort else offShort,
+            if (prefs.blockDownloads) onShort else offShort,
             if (prefs.blockScreenshots) onShort else offShort
         )
         addHubCategoryCard(privacyGroup, colors, density, getString(R.string.cat_hub_downloads), dlSub, R.drawable.ic_settings_downloads, CAT_DOWNLOADS)
@@ -1550,7 +1756,7 @@ class SettingsActivity : AppCompatActivity() {
             if (prefs.builtinBlocklistEnabled) onShort else offShort,
             prefs.parsedCustomRules().size
         )
-        addHubCategoryCard(netSnakeGroup, colors, density, getString(R.string.cat_hub_blocking), blockingSub, R.drawable.ic_chrome_tune, CAT_BLOCKING)
+        addHubCategoryCard(netSnakeGroup, colors, density, getString(R.string.cat_hub_blocking), blockingSub, R.drawable.ic_settings_block, CAT_BLOCKING)
 
         val activeShields = listOf(
             prefs.noiseCanvasWebgl,
@@ -1559,7 +1765,9 @@ class SettingsActivity : AppCompatActivity() {
             prefs.sensorFallback,
             prefs.fuzzPerformanceNow,
             prefs.hideVisibilityFocus,
-            prefs.suppressJsDialogs
+            prefs.suppressJsDialogs,
+            prefs.blockFileUploads,
+            prefs.blockOAuthPopups
         ).count { it }
         val antiFpSub = getString(
             R.string.hub_sub_antifp,
@@ -1616,6 +1824,262 @@ class SettingsActivity : AppCompatActivity() {
         registerSearchEntry(getString(R.string.pref_reset_defaults), cat10Title, null, CAT_ABOUT, resetBtn)
         refreshGroupShapes(systemGroup, colors, density)
     }
+
+    private fun addCompatToggleGroup(
+        group: LinearLayout,
+        colors: SettingsUiColors,
+        density: Float,
+        specs: List<CompatToggleSpec>
+    ) {
+        specs.forEach { spec ->
+            addSwitchCard(
+                parent = group,
+                colors = colors,
+                density = density,
+                label = getString(spec.labelRes),
+                checked = spec.getter(),
+                description = spec.descRes?.let { getString(it) },
+                iconRes = spec.iconRes,
+                syncKey = spec.syncKey,
+                onChanged = spec.setter
+            )
+        }
+    }
+
+    private fun addCompatLinkCard(
+        group: LinearLayout,
+        colors: SettingsUiColors,
+        density: Float,
+        title: String,
+        initialSubtitle: String,
+        @DrawableRes iconRes: Int,
+        targetCategoryId: String
+    ): TextView {
+        val card = createBaseCardContainer(colors, density, hasIcon = true)
+        card.addView(createLeadingIcon(iconRes, colors, density))
+        val textCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        textCol.addView(TextView(this).apply {
+            text = title
+            textSize = 16f
+            typeface = SANS_NORMAL
+            setTextColor(colors.titleText)
+        })
+        val subTv = TextView(this).apply {
+            text = initialSubtitle
+            textSize = 13.5f
+            setTextColor(colors.subtitleText)
+            setPadding(0, (2 * density).toInt(), 0, 0)
+        }
+        textCol.addView(subTv)
+        card.addView(textCol)
+        SnakeTheme.attachExpressivePressAnimation(card, scaleDown = 0.975f)
+        card.setOnClickListener { pushSubCategory(targetCategoryId) }
+        group.addView(card)
+        return subTv
+    }
+
+    private fun buildCompatibilityCategory(
+        colors: SettingsUiColors,
+        density: Float
+    ) {
+        val compatTitle = getString(R.string.cat_hub_site_compat)
+        val compatSection = buildCategoryContainer(CAT_COMPATIBILITY, compatTitle) { section ->
+            // Group A: Logins & file uploads
+            addSubheader(section, colors, density, getString(R.string.subcat_compat_access), topDp = 6f)
+            val compatAccessGroup = createCardGroup(section)
+            addCompatToggleGroup(
+                group = compatAccessGroup,
+                colors = colors,
+                density = density,
+                specs = listOf(
+                    CompatToggleSpec(
+                        syncKey = SYNC_BLOCK_OAUTH_POPUPS,
+                        labelRes = R.string.pref_block_oauth_popups,
+                        descRes = R.string.compat_hint_block_oauth_popups,
+                        getter = { prefs.blockOAuthPopups },
+                        setter = { prefs.blockOAuthPopups = it }
+                    ),
+                    CompatToggleSpec(
+                        syncKey = SYNC_BLOCK_FILE_UPLOADS,
+                        labelRes = R.string.pref_block_file_uploads,
+                        descRes = null,
+                        getter = { prefs.blockFileUploads },
+                        setter = { prefs.blockFileUploads = it }
+                    )
+                )
+            )
+            refreshGroupShapes(compatAccessGroup, colors, density)
+
+            // Group B: Site shields (On by default)
+            addSubheader(section, colors, density, getString(R.string.subcat_compat_shields))
+            val shieldsGroup = createCardGroup(section)
+            addCompatToggleGroup(
+                group = shieldsGroup,
+                colors = colors,
+                density = density,
+                specs = listOf(
+                    CompatToggleSpec(SYNC_NOISE_CANVAS, R.string.pref_noise_canvas, R.string.compat_hint_noise_canvas, getter = { prefs.noiseCanvasWebgl }, setter = { prefs.noiseCanvasWebgl = it }),
+                    CompatToggleSpec(SYNC_HIDE_VISIBILITY, R.string.pref_hide_visibility, R.string.compat_hint_hide_visibility, getter = { prefs.hideVisibilityFocus }, setter = { prefs.hideVisibilityFocus = it }),
+                    CompatToggleSpec(SYNC_LOCK_VIEWPORT, R.string.pref_lock_viewport, R.string.compat_hint_lock_viewport, getter = { prefs.lockViewport }, setter = { prefs.lockViewport = it }),
+                    CompatToggleSpec(SYNC_NOISE_AUDIO, R.string.pref_noise_audio, R.string.compat_hint_noise_audio, getter = { prefs.noiseAudio }, setter = { prefs.noiseAudio = it }),
+                    CompatToggleSpec(SYNC_SENSOR_FALLBACK, R.string.pref_sensor_fallback, R.string.compat_hint_sensor_fallback, getter = { prefs.sensorFallback }, setter = { prefs.sensorFallback = it }),
+                    CompatToggleSpec(SYNC_FUZZ_PERF, R.string.pref_fuzz_perf, R.string.compat_hint_fuzz_perf, getter = { prefs.fuzzPerformanceNow }, setter = { prefs.fuzzPerformanceNow = it })
+                )
+            )
+            addSwitchCard(
+                parent = shieldsGroup,
+                colors = colors,
+                density = density,
+                label = getString(R.string.pref_jitter_enabled),
+                checked = prefs.microJitterEnabled,
+                description = getString(R.string.compat_hint_jitter_enabled),
+                syncKey = SYNC_JITTER_ENABLED
+            ) { enabled ->
+                prefs.microJitterEnabled = enabled
+            }
+            val (compatMinCard, _) = addDelayStepperCard(
+                parent = shieldsGroup,
+                colors = colors,
+                density = density,
+                label = getString(R.string.pref_jitter_min),
+                initialSec = prefs.microJitterMinSec,
+                minLimit = 5,
+                maxLimit = 60,
+                valueProvider = { prefs.microJitterMinSec },
+                syncKey = SYNC_JITTER_MIN,
+                syncKeysToRefresh = listOf(SYNC_JITTER_MIN, SYNC_JITTER_MAX),
+                onChanged = { newMin -> prefs.microJitterMinSec = newMin }
+            )
+            val (compatMaxCard, _) = addDelayStepperCard(
+                parent = shieldsGroup,
+                colors = colors,
+                density = density,
+                label = getString(R.string.pref_jitter_max),
+                initialSec = prefs.microJitterMaxSec,
+                minLimit = 5,
+                maxLimit = 90,
+                valueProvider = { prefs.microJitterMaxSec },
+                syncKey = SYNC_JITTER_MAX,
+                syncKeysToRefresh = listOf(SYNC_JITTER_MIN, SYNC_JITTER_MAX),
+                onChanged = { newMax -> prefs.microJitterMaxSec = newMax }
+            )
+            addSwitchCard(
+                parent = shieldsGroup,
+                colors = colors,
+                density = density,
+                label = getString(R.string.pref_suppress_dialogs),
+                checked = prefs.suppressJsDialogs,
+                description = getString(R.string.compat_hint_suppress_dialogs),
+                syncKey = SYNC_SUPPRESS_DIALOGS
+            ) { prefs.suppressJsDialogs = it }
+
+            val updateCompatJitterCards: (Boolean) -> Unit = { enabled ->
+                val vis = if (enabled) View.VISIBLE else View.GONE
+                compatMinCard.visibility = vis
+                compatMaxCard.visibility = vis
+                refreshGroupShapes(shieldsGroup, colors, density)
+            }
+            jitterShapeSyncHooks.add(updateCompatJitterCards)
+            val initialJitterVis = if (prefs.microJitterEnabled) View.VISIBLE else View.GONE
+            compatMinCard.visibility = initialJitterVis
+            compatMaxCard.visibility = initialJitterVis
+            refreshGroupShapes(shieldsGroup, colors, density)
+            enableGroupLayoutTransition(shieldsGroup)
+
+            // Group B2: Network & app links (On by default)
+            addSubheader(section, colors, density, getString(R.string.subcat_compat_network))
+            val networkGroup = createCardGroup(section)
+            addCompatToggleGroup(
+                group = networkGroup,
+                colors = colors,
+                density = density,
+                specs = listOf(
+                    CompatToggleSpec(SYNC_BUILTIN_BLOCKLIST, R.string.pref_builtin_blocklist, R.string.compat_hint_builtin_blocklist, getter = { prefs.builtinBlocklistEnabled }, setter = { prefs.builtinBlocklistEnabled = it }),
+                    CompatToggleSpec(SYNC_BLOCK_BEACONS, R.string.pref_block_beacons, R.string.compat_hint_block_beacons, getter = { prefs.blockBeacons }, setter = { prefs.blockBeacons = it }),
+                    CompatToggleSpec(SYNC_BLOCK_WEBRTC, R.string.pref_block_webrtc, R.string.compat_hint_block_webrtc, getter = { prefs.blockWebRtcIce }, setter = { prefs.blockWebRtcIce = it }),
+                    CompatToggleSpec(SYNC_BLOCK_SCHEMES, R.string.pref_block_schemes, R.string.compat_hint_block_schemes, getter = { prefs.blockExternalSchemes }, setter = { prefs.blockExternalSchemes = it })
+                )
+            )
+            refreshGroupShapes(networkGroup, colors, density)
+
+            // Group D: Related sections
+            addSubheader(section, colors, density, getString(R.string.subcat_compat_links))
+            val linksGroup = createCardGroup(section)
+            val dlSubTv = addCompatLinkCard(
+                group = linksGroup,
+                colors = colors,
+                density = density,
+                title = getString(R.string.compat_link_downloads),
+                initialSubtitle = "",
+                iconRes = R.drawable.ic_settings_downloads,
+                targetCategoryId = CAT_DOWNLOADS
+            )
+            val wipeSubTv = addCompatLinkCard(
+                group = linksGroup,
+                colors = colors,
+                density = density,
+                title = getString(R.string.compat_link_wipe),
+                initialSubtitle = "",
+                iconRes = R.drawable.ic_menu_wipe,
+                targetCategoryId = CAT_WIPE
+            )
+            val vpnSubTv = addCompatLinkCard(
+                group = linksGroup,
+                colors = colors,
+                density = density,
+                title = getString(R.string.compat_link_vpn),
+                initialSubtitle = "",
+                iconRes = R.drawable.ic_settings_vpn,
+                targetCategoryId = CAT_VPN
+            )
+            val blockingSubTv = addCompatLinkCard(
+                group = linksGroup,
+                colors = colors,
+                density = density,
+                title = getString(R.string.compat_link_blocking),
+                initialSubtitle = "",
+                iconRes = R.drawable.ic_settings_block,
+                targetCategoryId = CAT_BLOCKING
+            )
+            refreshGroupShapes(linksGroup, colors, density)
+
+            compatRefreshHook = {
+                val onShort = getString(R.string.state_on_short)
+                val offShort = getString(R.string.state_off_short)
+                dlSubTv.text = getString(
+                    R.string.compat_link_downloads_sub,
+                    if (prefs.blockDownloads) onShort else offShort,
+                    if (prefs.blockScreenshots) onShort else offShort
+                )
+                wipeSubTv.text = getString(
+                    R.string.compat_link_wipe_sub,
+                    if (prefs.autoWipeOnExit) onShort else offShort
+                )
+                vpnSubTv.text = getString(
+                    R.string.compat_link_vpn_sub,
+                    if (prefs.vpnKillSwitchEnabled) onShort else offShort
+                )
+                blockingSubTv.text = getString(
+                    R.string.compat_link_blocking_sub,
+                    if (prefs.builtinBlocklistEnabled) onShort else offShort,
+                    prefs.parsedCustomRules().size
+                )
+            }
+            compatRefreshHook?.invoke()
+        }
+        registerSearchEntry(
+            title = compatTitle,
+            category = getString(R.string.hub_group_everyday),
+            iconRes = R.drawable.ic_chrome_tune,
+            categoryId = CAT_COMPATIBILITY,
+            targetView = null,
+            extraKeywords = getString(R.string.compat_search_keywords)
+        )
+    }
+
     private fun addHubCategoryCard(
         group: LinearLayout,
         colors: SettingsUiColors,
@@ -1779,7 +2243,8 @@ class SettingsActivity : AppCompatActivity() {
         fun renderResults(query: String) {
             resultsList.removeAllViews()
             val q = query.trim().lowercase()
-            val matches = if (q.isEmpty()) searchEntries else searchEntries.filter { it.keywords.contains(q) }
+            val visibleEntries = searchEntries.filter { it.targetView?.visibility != View.GONE }
+            val matches = if (q.isEmpty()) visibleEntries else visibleEntries.filter { it.keywords.contains(q) }
             if (matches.isEmpty()) {
                 resultsList.addView(TextView(this).apply {
                     text = getString(R.string.settings_search_empty)
@@ -1871,8 +2336,14 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun closeSearchOverlay() {
-        searchOverlay?.let {
-            rootFrame.removeView(it)
+        searchOverlay?.let { overlay ->
+            runCatching {
+                val target = currentFocus ?: overlay
+                target.clearFocus()
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+                imm?.hideSoftInputFromWindow(overlay.windowToken, 0)
+            }
+            rootFrame.removeView(overlay)
             searchOverlay = null
             searchResultsList = null
         }
@@ -1883,13 +2354,23 @@ class SettingsActivity : AppCompatActivity() {
         category: String,
         @DrawableRes iconRes: Int?,
         categoryId: String,
-        targetView: View
+        targetView: View?,
+        extraKeywords: String = ""
     ) {
+        val combinedKeywords = buildString {
+            append(title.lowercase())
+            append(' ')
+            append(category.lowercase())
+            if (extraKeywords.isNotBlank()) {
+                append(' ')
+                append(extraKeywords.lowercase())
+            }
+        }
         searchEntries.add(
             SearchEntry(
                 title = title,
                 category = category,
-                keywords = "${title.lowercase()} ${category.lowercase()}",
+                keywords = combinedKeywords,
                 iconRes = iconRes,
                 categoryId = categoryId,
                 targetView = targetView
@@ -2171,9 +2652,11 @@ class SettingsActivity : AppCompatActivity() {
                         ignoreChange = true
                         sw.isChecked = false
                         ignoreChange = false
+                        buildSettingsUi(preserveScroll = true)
                     }
                 } else {
                     prefs.pinAutoWipeOnFail = isChecked
+                    buildSettingsUi(preserveScroll = true)
                 }
             }
         }
@@ -2255,6 +2738,24 @@ class SettingsActivity : AppCompatActivity() {
         SnakeTheme.styleExpressiveDialog(d, palette)
     }
 
+    private fun applyPresetButtonStyle(
+        button: MaterialButton,
+        active: Boolean,
+        colors: SettingsUiColors,
+        density: Float
+    ) {
+        if (active) {
+            button.backgroundTintList = ColorStateList.valueOf(colors.switchTrackOn)
+            button.setTextColor(colors.switchThumbOn)
+            button.strokeWidth = 0
+        } else {
+            button.backgroundTintList = ColorStateList.valueOf(colors.inputFieldBg)
+            button.setTextColor(colors.titleText)
+            button.strokeColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(colors.subtitleText, 70))
+            button.strokeWidth = (1 * density).toInt()
+        }
+    }
+
     private fun createPresetButton(
         label: String,
         active: Boolean,
@@ -2262,9 +2763,6 @@ class SettingsActivity : AppCompatActivity() {
         density: Float,
         onClick: () -> Unit
     ): MaterialButton {
-        val activeBg = colors.switchTrackOn
-        val activeText = colors.switchThumbOn
-        val inactiveBg = colors.inputFieldBg
         return MaterialButton(this).apply {
             text = label
             textSize = 13f
@@ -2281,16 +2779,7 @@ class SettingsActivity : AppCompatActivity() {
             insetBottom = (2 * density).toInt()
             minHeight = (40 * density).toInt()
             minimumHeight = (40 * density).toInt()
-            if (active) {
-                backgroundTintList = ColorStateList.valueOf(activeBg)
-                setTextColor(activeText)
-                strokeWidth = 0
-            } else {
-                backgroundTintList = ColorStateList.valueOf(inactiveBg)
-                setTextColor(colors.titleText)
-                strokeColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(colors.subtitleText, 70))
-                strokeWidth = (1 * density).toInt()
-            }
+            applyPresetButtonStyle(this, active, colors, density)
             layoutParams = LinearLayout.LayoutParams(0, (40 * density).toInt(), 1f)
             SnakeTheme.attachExpressivePressAnimation(this, scaleDown = 0.95f)
             setOnClickListener { onClick() }
@@ -2308,6 +2797,31 @@ class SettingsActivity : AppCompatActivity() {
         )
     }
 
+    private fun syncSwitchValue(syncKey: String, checked: Boolean) {
+        val callbacks = switchSyncCallbacks[syncKey] ?: return
+        isSyncingControls = true
+        try {
+            callbacks.forEach { it(checked) }
+        } finally {
+            isSyncingControls = false
+        }
+        if (syncKey == SYNC_JITTER_ENABLED) {
+            jitterShapeSyncHooks.forEach { it(checked) }
+        }
+        refreshDerivedUiState()
+    }
+
+    private fun syncStepperKeys(keys: List<String>) {
+        keys.forEach { key ->
+            stepperSyncCallbacks[key]?.forEach { it() }
+        }
+    }
+
+    private fun refreshDerivedUiState() {
+        presetButtonsRefreshHook?.invoke()
+        compatRefreshHook?.invoke()
+    }
+
     private fun addSwitchCard(
         parent: LinearLayout,
         colors: SettingsUiColors,
@@ -2316,6 +2830,7 @@ class SettingsActivity : AppCompatActivity() {
         checked: Boolean,
         description: String? = null,
         @DrawableRes iconRes: Int? = null,
+        syncKey: String? = null,
         onChanged: (Boolean) -> Unit
     ): View {
         val card = createBaseCardContainer(colors, density, hasIcon = iconRes != null)
@@ -2347,7 +2862,20 @@ class SettingsActivity : AppCompatActivity() {
             text = label
             isChecked = checked
             applySwitchColors(this, colors)
-            setOnCheckedChangeListener { _, isChecked -> onChanged(isChecked) }
+            setOnCheckedChangeListener { _, isChecked ->
+                if (isSyncingControls) return@setOnCheckedChangeListener
+                onChanged(isChecked)
+                if (syncKey != null) {
+                    syncSwitchValue(syncKey, isChecked)
+                }
+            }
+        }
+        if (syncKey != null) {
+            switchSyncCallbacks.getOrPut(syncKey) { mutableListOf() }.add { targetChecked ->
+                if (sw.isChecked != targetChecked) {
+                    sw.isChecked = targetChecked
+                }
+            }
         }
         card.addView(textCol)
         card.addView(sw)
@@ -2550,6 +3078,8 @@ class SettingsActivity : AppCompatActivity() {
         minLimit: Int,
         maxLimit: Int,
         valueProvider: (() -> Int)? = null,
+        syncKey: String? = null,
+        syncKeysToRefresh: List<String> = emptyList(),
         onChanged: (Int) -> Unit
     ): Pair<View, TextView> {
         val card = createBaseCardContainer(colors, density, hasIcon = false)
@@ -2568,6 +3098,12 @@ class SettingsActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             minWidth = (44 * density).toInt()
         }
+        if (syncKey != null) {
+            stepperSyncCallbacks.getOrPut(syncKey) { mutableListOf() }.add {
+                currentVal = valueProvider?.invoke() ?: currentVal
+                valueTv.text = getString(R.string.jitter_seconds_format, currentVal)
+            }
+        }
         val createStepBtn = { sign: String, delta: Int ->
             MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
                 text = sign
@@ -2585,6 +3121,9 @@ class SettingsActivity : AppCompatActivity() {
                     onChanged(next)
                     currentVal = valueProvider?.invoke() ?: next
                     valueTv.text = getString(R.string.jitter_seconds_format, currentVal)
+                    if (syncKeysToRefresh.isNotEmpty()) {
+                        syncStepperKeys(syncKeysToRefresh)
+                    }
                 }
             }
         }
@@ -2604,7 +3143,7 @@ class SettingsActivity : AppCompatActivity() {
         subtitle: String? = null,
         @DrawableRes iconRes: Int? = null,
         onClick: () -> Unit
-    ): Button {
+    ): View {
         val padStart = ((if (iconRes != null) 20 else 18) * density).toInt()
         val padEnd = (16 * density).toInt()
         val padV = (14 * density).toInt()
@@ -2670,7 +3209,7 @@ class SettingsActivity : AppCompatActivity() {
         SnakeTheme.attachExpressivePressAnimation(wrapper, scaleDown = 0.975f)
         wrapper.setOnClickListener { innerBtn.performClick() }
         parent.addView(wrapper)
-        return innerBtn
+        return wrapper
     }
 
     companion object {
@@ -2678,8 +3217,12 @@ class SettingsActivity : AppCompatActivity() {
         const val SECTION_DOWNLOADS = "section_downloads"
         const val SECTION_SEARCH_HOME = "section_search_home"
         private const val STATE_ACTIVE_CATEGORY = "state_active_category"
+        private const val STATE_CATEGORY_STACK = "state_category_stack"
+        private const val STATE_SCROLL_STACK = "state_scroll_stack"
+        private const val STATE_INITIAL_TARGET_HANDLED = "state_initial_target_handled"
 
         internal const val CAT_PRESETS = "cat_presets"
+        internal const val CAT_COMPATIBILITY = "cat_compatibility"
         internal const val CAT_SEARCH_HOME = "cat_search_home"
         internal const val CAT_APPEARANCE = "cat_appearance"
         internal const val CAT_PIN = "cat_pin"
@@ -2689,6 +3232,23 @@ class SettingsActivity : AppCompatActivity() {
         internal const val CAT_BLOCKING = "cat_blocking"
         internal const val CAT_ANTIFP = "cat_antifp"
         internal const val CAT_ABOUT = "cat_about"
+
+        private const val SYNC_BUILTIN_BLOCKLIST = "sync_builtin_blocklist"
+        private const val SYNC_BLOCK_WEBRTC = "sync_block_webrtc"
+        private const val SYNC_BLOCK_BEACONS = "sync_block_beacons"
+        private const val SYNC_NOISE_CANVAS = "sync_noise_canvas"
+        private const val SYNC_NOISE_AUDIO = "sync_noise_audio"
+        private const val SYNC_HIDE_VISIBILITY = "sync_hide_visibility"
+        private const val SYNC_LOCK_VIEWPORT = "sync_lock_viewport"
+        private const val SYNC_SENSOR_FALLBACK = "sync_sensor_fallback"
+        private const val SYNC_FUZZ_PERF = "sync_fuzz_perf"
+        private const val SYNC_JITTER_ENABLED = "sync_jitter_enabled"
+        private const val SYNC_JITTER_MIN = "sync_jitter_min"
+        private const val SYNC_JITTER_MAX = "sync_jitter_max"
+        private const val SYNC_BLOCK_SCHEMES = "sync_block_schemes"
+        private const val SYNC_SUPPRESS_DIALOGS = "sync_suppress_dialogs"
+        private const val SYNC_BLOCK_FILE_UPLOADS = "sync_block_file_uploads"
+        private const val SYNC_BLOCK_OAUTH_POPUPS = "sync_block_oauth_popups"
 
         internal const val OUTER_CORNER_DP = 24f
         internal const val INNER_CORNER_DP = 4f

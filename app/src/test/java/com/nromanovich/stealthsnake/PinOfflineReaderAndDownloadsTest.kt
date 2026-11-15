@@ -183,7 +183,7 @@ class PinOfflineReaderAndDownloadsTest {
     @Test
     fun `DownloadsActivity shows disabled notice and opens Settings scrolled to Downloads`() {
         val prefs = SnakePreferences(ctx)
-        prefs.downloadsEnabled = false
+        prefs.blockDownloads = true
         DownloadHistoryStore(ctx).record("archive.zip", "application/zip", true)
 
         val controller = Robolectric.buildActivity(DownloadsActivity::class.java).setup()
@@ -193,8 +193,8 @@ class PinOfflineReaderAndDownloadsTest {
         assertNotNull(findTextViewWithText(root, ctx.getString(R.string.downloads_disabled_notice)))
         assertNotNull(findTextViewContaining(root, "archive.zip"))
 
-        val enableBtn = findButtonWithText(root, ctx.getString(R.string.downloads_enable_in_settings))!!
-        enableBtn.performClick()
+        val settingsBtn = findButtonWithText(root, ctx.getString(R.string.downloads_open_settings))!!
+        settingsBtn.performClick()
         val started = Shadows.shadowOf(activity).nextStartedActivity
         assertEquals(SettingsActivity::class.java.name, started.component?.className)
         assertEquals(
@@ -215,7 +215,7 @@ class PinOfflineReaderAndDownloadsTest {
     @Test
     fun `DownloadsActivity shows Open warning dialog and Delete physically removes recorded file`() {
         val prefs = SnakePreferences(ctx)
-        prefs.downloadsEnabled = true
+        prefs.blockDownloads = false
         val dir = File(ctx.filesDir, "downloads").apply { mkdirs() }
         val file = File(dir, "doc.pdf").apply { writeText("pdf-data") }
         DownloadHistoryStore(ctx).record(

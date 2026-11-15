@@ -208,16 +208,16 @@ class SnakeClientAndChromeTest {
         var chooserBlocked = false
         val openPopupCalls = mutableListOf<Boolean>()
         val chrome = SnakeChrome(
-            allowFileUploads = false,
-            allowOAuthPopups = true,
+            blockFileUploads = true,
+            blockOAuthPopups = false,
             onFileChooserBlockedCallback = { chooserBlocked = true },
             onOpenFileChooserCallback = { cb, _ ->
                 chooserOpened = true
                 cb.onReceiveValue(null)
                 true
             },
-            onOpenPopupWindowCallback = { _, _, allowPopup ->
-                openPopupCalls.add(allowPopup)
+            onOpenPopupWindowCallback = { _, _, blockPopup ->
+                openPopupCalls.add(blockPopup)
                 true
             }
         )
@@ -226,7 +226,7 @@ class SnakeClientAndChromeTest {
         assertTrue(chooserBlocked)
         assertFalse(chooserOpened)
 
-        chrome.allowFileUploads = true
+        chrome.blockFileUploads = false
         assertTrue(chrome.onShowFileChooser(null, ValueCallback {}, null))
         assertTrue(chooserOpened)
 
@@ -234,6 +234,6 @@ class SnakeClientAndChromeTest {
         assertTrue(openPopupCalls.isEmpty())
 
         assertTrue(chrome.onCreateWindow(null, isDialog = false, isUserGesture = true, resultMsg = Message.obtain()))
-        assertEquals(listOf(true), openPopupCalls)
+        assertEquals(listOf(false), openPopupCalls)
     }
 }

@@ -193,6 +193,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         get() = activeSession.errorUrl
         set(value) { activeSession.errorUrl = value }
     private var pendingFileUploadCallback: ValueCallback<Array<Uri>>? = null
+    private var pendingFileUploadFromPopup: Boolean = false
     private var fileUploadExecutor: java.util.concurrent.ExecutorService? = null
     private val fileUploadGeneration = AtomicLong(0L)
     private var activePopupDialog: AlertDialog? = null
@@ -962,8 +963,8 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
         val chrome = SnakeChrome(
             suppressDialogs = sessionPolicy.suppressJsDialogs,
-            allowFileUploads = sessionPolicy.allowFileUploads,
-            allowOAuthPopups = sessionPolicy.allowOAuthPopups,
+            blockFileUploads = sessionPolicy.blockFileUploads,
+            blockOAuthPopups = sessionPolicy.blockOAuthPopups,
             onProgressChangedCallback = { progress ->
                 if (session === activeSession) {
                     if (progress in 1..99) {
@@ -1008,12 +1009,12 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                     false
                 }
             },
-            onOpenPopupWindowCallback = { isUserGesture, resultMsg, allowPopup ->
+            onOpenPopupWindowCallback = { isUserGesture, resultMsg, blockPopup ->
                 if (isUserGesture && resultMsg != null && session === activeSession && !isFinishing && !isDestroyed && !isPinLocked) {
                     if (Looper.myLooper() == Looper.getMainLooper()) {
-                        handlePopupWindowRequest(session, resultMsg, allowPopup)
+                        handlePopupWindowRequest(session, resultMsg, blockPopup)
                     } else {
-                        runOnUiThread { handlePopupWindowRequest(session, resultMsg, allowPopup) }
+                        runOnUiThread { handlePopupWindowRequest(session, resultMsg, blockPopup) }
                     }
                     true
                 } else {
@@ -1349,7 +1350,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             }
         }
 
-        if (prefs.downloadsEnabled) {
+        if (!prefs.blockDownloads) {
             if (!session.downloadListenerAttached) {
                 targetView.setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
                     if (isFinishing || isDestroyed || isPinLocked) return@setDownloadListener
@@ -1367,8 +1368,14 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         session.snakeClient.blockExternalSchemes = policy.blockExternalSchemes
         session.snakeClient.vpnKillSwitchEnabled = prefs.vpnKillSwitchEnabled
         session.snakeChrome.suppressDialogs = policy.suppressJsDialogs
-        session.snakeChrome.allowFileUploads = policy.allowFileUploads
-        session.snakeChrome.allowOAuthPopups = policy.allowOAuthPopups
+        session.snakeChrome.blockFileUploads = policy.blockFileUploads
+        session.snakeChrome.blockOAuthPopups = policy.blockOAuthPopups
+        if (session === activeSession) {
+            (activePopupWebView?.webChromeClient as? SnakeChrome)?.let { popupChrome ->
+                popupChrome.suppressDialogs = policy.suppressJsDialogs
+                popupChrome.blockFileUploads = policy.blockFileUploads
+            }
+        }
     }
 
     private fun bindControls() {
@@ -1593,7 +1600,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
 
     private fun loadInitialHomePage() {
         val home = prefs.homeUrl
-        if (prefs.vpnKillSwitchEnabled && !prefs.vpnBypassStartCheck && !VpnGuard.isVpnActive(this)) {
+        if (prefs.vpnKillSwitchEnabled && prefs.vpnCheckStartPage && !VpnGuard.isVpnActive(this)) {
             pendingVpnUrl = home
             webView.loadUrl(DEFAULT_START_URL)
             showVpnBlockedOverlay()
@@ -1868,13 +1875,26 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         SnakeTheme.styleExpressiveDialog(dialog, prefs.themePalette)
     }
 
+    private fun cancelPendingFileUpload() {
+        fileUploadGeneration.incrementAndGet()
+        pendingFileUploadCallback?.let { runCatching { it.onReceiveValue(null) } }
+        pendingFileUploadCallback = null
+        pendingFileUploadFromPopup = false
+    }
+
     private fun launchSanitizedFileChooser(
         filePathCallback: ValueCallback<Array<Uri>>?,
-        params: WebChromeClient.FileChooserParams?
+        params: WebChromeClient.FileChooserParams?,
+        fromPopup: Boolean = false
     ) {
         if (filePathCallback == null) return
-        pendingFileUploadCallback?.onReceiveValue(null)
+        if (isPinLocked || PinLockCoordinator.isLocked(prefs) || resolveSessionPolicy(activeSession).blockFileUploads) {
+            filePathCallback.onReceiveValue(null)
+            return
+        }
+        cancelPendingFileUpload()
         pendingFileUploadCallback = filePathCallback
+        pendingFileUploadFromPopup = fromPopup
         val pickerIntent = runCatching { params?.createIntent() }.getOrNull()
             ?: Intent(Intent.ACTION_GET_CONTENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
@@ -1886,6 +1906,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         }.getOrDefault(false)
         if (!launched) {
             pendingFileUploadCallback = null
+            pendingFileUploadFromPopup = false
             filePathCallback.onReceiveValue(null)
             Toast.makeText(this, R.string.file_upload_sanitize_failed, Toast.LENGTH_SHORT).show()
         }
@@ -1894,7 +1915,11 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     private fun handleFileChooserResult(resultCode: Int, data: Intent?) {
         val callback = pendingFileUploadCallback ?: return
         pendingFileUploadCallback = null
-        if (resultCode != RESULT_OK || data == null) {
+        val wasFromPopup = pendingFileUploadFromPopup
+        pendingFileUploadFromPopup = false
+        if (resultCode != RESULT_OK || data == null || isPinLocked || PinLockCoordinator.isLocked(prefs) ||
+            resolveSessionPolicy(activeSession).blockFileUploads || (wasFromPopup && activePopupWebView == null)
+        ) {
             callback.onReceiveValue(null)
             return
         }
@@ -1932,7 +1957,10 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                 }
             }
             mainHandler.post {
-                if (isFinishing || isDestroyed || isPinLocked || uploadGen != fileUploadGeneration.get()) {
+                if (isFinishing || isDestroyed || isPinLocked || PinLockCoordinator.isLocked(prefs) ||
+                    uploadGen != fileUploadGeneration.get() || resolveSessionPolicy(activeSession).blockFileUploads ||
+                    (wasFromPopup && activePopupWebView == null)
+                ) {
                     sanitized.forEach { u -> u.path?.let { runCatching { File(it).delete() } } }
                     callback.onReceiveValue(null)
                     return@post
@@ -1951,11 +1979,11 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     private fun handlePopupWindowRequest(
         parentSession: BrowserSession,
         resultMsg: Message?,
-        allowPopup: Boolean
+        blockPopup: Boolean
     ) {
         if (resultMsg == null) return
         val transport = resultMsg.obj as? WebView.WebViewTransport ?: return
-        if (!allowPopup) {
+        if (blockPopup) {
             Toast.makeText(this, R.string.popup_blocked_notice, Toast.LENGTH_SHORT).show()
             val handled = AtomicBoolean(false)
             val extractor = WebView(this)
@@ -2089,8 +2117,27 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         )
         popupWebView.webChromeClient = SnakeChrome(
             suppressDialogs = policy.suppressJsDialogs,
-            allowFileUploads = false,
-            allowOAuthPopups = false,
+            blockFileUploads = policy.blockFileUploads,
+            blockOAuthPopups = true,
+            onFileChooserBlockedCallback = {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed && activePopupWebView === popupWebView && parentSession === activeSession) {
+                        Toast.makeText(this, R.string.file_upload_blocked_notice, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onOpenFileChooserCallback = { callback, params ->
+                if (activePopupWebView === popupWebView && parentSession === activeSession && !isFinishing && !isDestroyed && !isPinLocked) {
+                    if (Looper.myLooper() == Looper.getMainLooper()) {
+                        launchSanitizedFileChooser(callback, params, fromPopup = true)
+                    } else {
+                        runOnUiThread { launchSanitizedFileChooser(callback, params, fromPopup = true) }
+                    }
+                    true
+                } else {
+                    false
+                }
+            },
             onCloseWindowCallback = { closed ->
                 runOnUiThread {
                     if (closed == null || closed === activePopupWebView) closeActivePopupWindow()
@@ -2123,6 +2170,9 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                 if (activePopupWebView === popupWebView) {
                     activePopupWebView = null
                     activePopupDialog = null
+                    if (pendingFileUploadFromPopup) {
+                        cancelPendingFileUpload()
+                    }
                 }
             }
             .show()
@@ -2139,6 +2189,9 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         val popup = activePopupWebView
         activePopupDialog = null
         activePopupWebView = null
+        if (pendingFileUploadFromPopup) {
+            cancelPendingFileUpload()
+        }
         runCatching { dialog?.dismiss() }
         if (popup != null) {
             runCatching {
@@ -2171,7 +2224,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
             options.add(getString(R.string.context_copy_link) to {
                 copyTextToClipboard("url", safeHttp, R.string.url_copied)
             })
-            if (prefs.downloadsEnabled) {
+            if (!prefs.blockDownloads) {
                 if (hit.type == WebView.HitTestResult.SRC_ANCHOR_TYPE) {
                     options.add(getString(R.string.context_download_link) to {
                         promptDownloadConfirmation(safeHttp, unifiedUserAgent, null, null)
@@ -2182,7 +2235,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
                     })
                 }
             }
-        } else if (isImage && prefs.downloadsEnabled &&
+        } else if (isImage && !prefs.blockDownloads &&
             (raw.startsWith("data:", ignoreCase = true) || raw.startsWith("blob:", ignoreCase = true))
         ) {
             options.add(getString(R.string.context_download_image) to {
@@ -2532,7 +2585,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         if (!vpnUp) {
             suspendBackgroundSessionsForVpnLoss()
             closeActivePopupWindow()
-            if (!prefs.vpnBypassStartCheck || (webView.url != null && webView.url != DEFAULT_START_URL)) {
+            if (prefs.vpnCheckStartPage || (webView.url != null && webView.url != DEFAULT_START_URL)) {
                 handleVpnBlocked(webView.url ?: pendingVpnUrl ?: prefs.homeUrl)
             }
         } else {
@@ -2617,6 +2670,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         if (target !in sessions) return
         val switching = target !== activeSession
         if (switching) {
+            cancelPendingFileUpload()
             cancelDomImeProbes(clearState = true)
             closeFindBar()
             closeReaderMode()
@@ -3131,12 +3185,17 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         approvedHttpHosts.clear()
         lastLoadedHomeUrl = DEFAULT_START_URL
         Toast.makeText(this, R.string.pin_wiped, Toast.LENGTH_LONG).show()
-        unlockPinOverlay()
+        if (!PinLockCoordinator.isLocked(prefs)) {
+            unlockPinOverlay()
+        } else {
+            showPinLockOverlay()
+        }
     }
 
     private fun showPinLockOverlay() {
         if (isPinLocked || !prefs.pinLockEnabled) return
         isPinLocked = true
+        cancelPendingFileUpload()
         updateWebViewImeTranslation()
         microJitter.stop()
         activeMenuPopup?.dismiss()

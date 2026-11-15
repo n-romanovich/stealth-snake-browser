@@ -310,7 +310,7 @@ class SessionsAndUiTest {
         }
         val navNavigation = findTextView(root, ctx.getString(R.string.nav_navigation))!!
         assertEquals(SnakePreferences(ctx).themePalette.accent, navNavigation.currentTextColor)
-        assertNotNull(findAnyText(root, ctx.getString(R.string.pref_downloads_enabled)))
+        assertNotNull(findAnyText(root, ctx.getString(R.string.pref_block_downloads)))
         assertNotNull(findTextView(root, ctx.getString(R.string.pin_status_disabled)))
 
         controller.pause().destroy()
@@ -413,11 +413,11 @@ class SessionsAndUiTest {
         val updatedRadii = ((vpnCard.background as android.graphics.drawable.RippleDrawable).getDrawable(0) as android.graphics.drawable.GradientDrawable).cornerRadii!!
         assertEquals(SettingsActivity.OUTER_CORNER_DP * density, updatedRadii[0], 0.5f)
         assertEquals(SettingsActivity.INNER_CORNER_DP * density, updatedRadii[4], 0.5f)
-        val bypassCard = vpnGroup.getChildAt(1)
-        assertEquals(View.VISIBLE, bypassCard.visibility)
-        val bypassRadii = ((bypassCard.background as android.graphics.drawable.RippleDrawable).getDrawable(0) as android.graphics.drawable.GradientDrawable).cornerRadii!!
-        assertEquals(SettingsActivity.INNER_CORNER_DP * density, bypassRadii[0], 0.5f)
-        assertEquals(SettingsActivity.OUTER_CORNER_DP * density, bypassRadii[4], 0.5f)
+        val vpnCheckStartCard = vpnGroup.getChildAt(1)
+        assertEquals(View.VISIBLE, vpnCheckStartCard.visibility)
+        val checkStartRadii = ((vpnCheckStartCard.background as android.graphics.drawable.RippleDrawable).getDrawable(0) as android.graphics.drawable.GradientDrawable).cornerRadii!!
+        assertEquals(SettingsActivity.INNER_CORNER_DP * density, checkStartRadii[0], 0.5f)
+        assertEquals(SettingsActivity.OUTER_CORNER_DP * density, checkStartRadii[4], 0.5f)
 
         // Clicking header Back button returns from category sub-screen to Hub
         val backBtn = collectAll<android.widget.ImageButton>(root).first {
@@ -526,11 +526,11 @@ class SessionsAndUiTest {
         val tab2Policy = prefs.resolvePolicy(tab2.presetOverride, tab2.profileIdOverride)
         assertFalse(tab1Policy.noiseCanvasWebgl)
         assertFalse(tab1Policy.lockViewport)
-        assertTrue(tab1Policy.allowFileUploads)
-        assertTrue(tab1Policy.allowOAuthPopups)
+        assertFalse(tab1Policy.blockFileUploads)
+        assertFalse(tab1Policy.blockOAuthPopups)
         assertTrue(tab2Policy.noiseCanvasWebgl)
         assertTrue(tab2Policy.lockViewport)
-        assertFalse(tab2Policy.allowFileUploads)
+        assertTrue(tab2Policy.blockFileUploads)
 
         controller.pause().destroy()
     }

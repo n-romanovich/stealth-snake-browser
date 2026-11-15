@@ -47,9 +47,10 @@ class SettingsAndCapturesTest {
         vpnSwitch.performClick()
         assertTrue(prefs.vpnKillSwitchEnabled)
 
-        val bypassSwitch = findSwitchWithText(root, ctx.getString(R.string.pref_vpn_bypass_start))!!
-        bypassSwitch.performClick()
-        assertTrue(prefs.vpnBypassStartCheck)
+        val checkStartSwitch = findSwitchWithText(root, ctx.getString(R.string.pref_vpn_check_start))!!
+        assertTrue(checkStartSwitch.isChecked)
+        checkStartSwitch.performClick()
+        assertFalse(prefs.vpnCheckStartPage)
 
         val resetBtn = findButtonWithText(root, ctx.getString(R.string.pref_reset_defaults))!!
         resetBtn.performClick()
@@ -70,7 +71,7 @@ class SettingsAndCapturesTest {
         ShadowLooper.idleMainLooper()
 
         assertFalse(prefs.vpnKillSwitchEnabled)
-        assertFalse(prefs.vpnBypassStartCheck)
+        assertTrue(prefs.vpnCheckStartPage)
 
         controller.pause().destroy()
     }

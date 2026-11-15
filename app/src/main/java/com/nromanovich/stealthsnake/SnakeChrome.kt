@@ -18,15 +18,15 @@ import android.webkit.WebView
  */
 class SnakeChrome(
     @Volatile var suppressDialogs: Boolean = true,
-    @Volatile var allowFileUploads: Boolean = false,
-    @Volatile var allowOAuthPopups: Boolean = false,
+    @Volatile var blockFileUploads: Boolean = true,
+    @Volatile var blockOAuthPopups: Boolean = true,
     private val onProgressChangedCallback: (Int) -> Unit = {},
     private val onTitleChangedCallback: (String) -> Unit = {},
     private val onShowCustomViewCallback: (View?, CustomViewCallback?) -> Unit = { _, _ -> },
     private val onHideCustomViewCallback: () -> Unit = {},
     private val onFileChooserBlockedCallback: () -> Unit = {},
     private val onOpenFileChooserCallback: ((ValueCallback<Array<Uri>>, FileChooserParams?) -> Boolean)? = null,
-    private val onOpenPopupWindowCallback: ((isUserGesture: Boolean, resultMsg: Message?, isOAuthAllowed: Boolean) -> Boolean)? = null,
+    private val onOpenPopupWindowCallback: ((isUserGesture: Boolean, resultMsg: Message?, blockPopup: Boolean) -> Boolean)? = null,
     private val onCloseWindowCallback: ((WebView?) -> Unit)? = null
 ) : WebChromeClient() {
 
@@ -101,7 +101,7 @@ class SnakeChrome(
         filePathCallback: ValueCallback<Array<Uri>>?,
         fileChooserParams: FileChooserParams?
     ): Boolean {
-        if (allowFileUploads && filePathCallback != null && onOpenFileChooserCallback != null) {
+        if (!blockFileUploads && filePathCallback != null && onOpenFileChooserCallback != null) {
             if (onOpenFileChooserCallback.invoke(filePathCallback, fileChooserParams)) {
                 return true
             }
@@ -121,7 +121,7 @@ class SnakeChrome(
         if (!isUserGesture || resultMsg == null) {
             return false
         }
-        return onOpenPopupWindowCallback?.invoke(true, resultMsg, allowOAuthPopups) ?: false
+        return onOpenPopupWindowCallback?.invoke(true, resultMsg, blockOAuthPopups) ?: false
     }
 
     override fun onCloseWindow(window: WebView?) {

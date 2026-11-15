@@ -23,6 +23,7 @@ import android.widget.ImageButton
 import android.widget.TextView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -310,7 +311,7 @@ class MainActivityTest {
         val prefs = SnakePreferences(ctx)
         prefs.onboardingCompleted = true
         prefs.vpnKillSwitchEnabled = true
-        prefs.vpnBypassStartCheck = false
+        prefs.vpnCheckStartPage = true
         prefs.homeUrl = "https://example.org"
 
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
@@ -347,7 +348,7 @@ class MainActivityTest {
         val prefs = SnakePreferences(ctx)
         prefs.onboardingCompleted = true
         prefs.vpnKillSwitchEnabled = true
-        prefs.vpnBypassStartCheck = true
+        prefs.vpnCheckStartPage = false
         prefs.homeUrl = MainActivity.DEFAULT_START_URL
 
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
@@ -521,6 +522,45 @@ class MainActivityTest {
         controller.newIntent(Intent(Intent.ACTION_VIEW, Uri.parse("file:///etc/passwd")))
         ShadowLooper.idleMainLooper()
         assertEquals(2, activity.getSessionsForTest().size)
+
+        controller.pause().destroy()
+    }
+
+    @Test
+    fun `popup WebView inherits policy blockFileUploads while keeping nested OAuth popups blocked`() {
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<Context>()
+        val prefs = SnakePreferences(ctx).apply {
+            onboardingCompleted = true
+            blockOAuthPopups = false
+            blockFileUploads = false
+        }
+
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        val webView = activity.findViewById<WebView>(R.id.webView)
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        val transport = webView.WebViewTransport()
+        val msg = android.os.Message.obtain(mainHandler).apply { obj = transport }
+
+        assertTrue(webView.webChromeClient!!.onCreateWindow(webView, false, true, msg))
+        ShadowLooper.idleMainLooper()
+
+        val popupField = MainActivity::class.java.getDeclaredField("activePopupWebView").apply { isAccessible = true }
+        val popupWebView = popupField.get(activity) as? WebView
+        assertNotNull(popupWebView)
+        val popupChrome = popupWebView!!.webChromeClient as SnakeChrome
+        assertFalse(popupChrome.blockFileUploads)
+        assertTrue(popupChrome.blockOAuthPopups)
+
+        // Switching to blockFileUploads = true also blocks file chooser on newly opened popups.
+        prefs.blockFileUploads = true
+        val msg2 = android.os.Message.obtain(mainHandler).apply { obj = webView.WebViewTransport() }
+        assertTrue(webView.webChromeClient!!.onCreateWindow(webView, false, true, msg2))
+        ShadowLooper.idleMainLooper()
+        val popupWebView2 = popupField.get(activity) as WebView
+        val popupChrome2 = popupWebView2.webChromeClient as SnakeChrome
+        assertTrue(popupChrome2.blockFileUploads)
+        assertTrue(popupChrome2.blockOAuthPopups)
 
         controller.pause().destroy()
     }
