@@ -339,8 +339,9 @@ object SiteInfoSheet {
 
         data class Choice(val label: String, val presetKey: String?, val profileId: String?, val selected: Boolean)
         val noOverride = state.sessionPresetOverride.isNullOrBlank() && state.sessionProfileIdOverride.isNullOrBlank()
+        val globalDefaultName = resolveGlobalProfileName(activity, prefs)
         val choices = buildList {
-            add(Choice(activity.getString(R.string.session_profile_default), null, null, noOverride))
+            add(Choice(activity.getString(R.string.session_profile_default, globalDefaultName), null, null, noOverride))
             add(
                 Choice(
                     activity.getString(R.string.preset_max_stealth),
@@ -701,4 +702,13 @@ object SiteInfoSheet {
             setPadding(0, (1 * density).toInt(), 0, (6 * density).toInt())
         })
     }
+
+    internal fun resolveGlobalProfileName(context: Context, prefs: SnakePreferences): String =
+        prefs.activeProfileId?.let { id ->
+            prefs.listProfiles().firstOrNull { it.id == id }?.name
+        } ?: when (prefs.preset) {
+            ProtectionPreset.MAX_STEALTH -> context.getString(R.string.preset_max_stealth)
+            ProtectionPreset.COMPATIBILITY -> context.getString(R.string.preset_compatibility)
+            ProtectionPreset.CUSTOM -> context.getString(R.string.preset_custom)
+        }
 }

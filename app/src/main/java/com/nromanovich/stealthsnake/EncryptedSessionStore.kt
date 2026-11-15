@@ -164,7 +164,8 @@ class EncryptedSessionStore(context: Context) {
     }
 
     fun removeBookmark(url: String): List<Bookmark> {
-        val trimmed = listBookmarks().filterNot { it.url == url }
+        val target = url.trim()
+        val trimmed = listBookmarks().filterNot { it.url == target }
         if (trimmed.isEmpty()) {
             clearBookmarks()
         } else {

@@ -38,6 +38,9 @@ import androidx.activity.OnBackPressedCallback
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.graphics.ColorUtils
+import androidx.webkit.Profile
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebViewFeature
 import com.google.android.material.button.MaterialButton
 import java.util.Collections
 import java.util.WeakHashMap
@@ -697,7 +700,10 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
         val appCtx = context.applicationContext
         CaptureManager(appCtx).clearCaptures()
         OfflinePagesManager(appCtx).clearAll()
-        DownloadHistoryStore(appCtx).clear()
+        DownloadHistoryStore(appCtx).clearWithFiles(appCtx)
+        UploadSanitizer.clearTempUploads(appCtx)
+        EncryptedSessionStore(appCtx).cryptoEraseAll()
+        wipeMultiProfileStorage(preserveProfileName = null)
         runCatching { WebStorage.getInstance().deleteAllData() }
         runCatching { WebViewDatabase.getInstance(appCtx).clearHttpAuthUsernamePassword() }
         runCatching {
@@ -717,7 +723,38 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
                 flush()
             }
         }
-        SnakePreferences(appCtx).scrubSensitiveDataForPanicWipe()
+        val prefs = SnakePreferences(appCtx)
+        prefs.scrubSensitiveDataForPanicWipe()
+    }
+
+    /**
+     * Clears WebStorage, geolocation permissions, and cookies for isolated [Profile] instances,
+     * deleting all non-default profiles except [preserveProfileName] (an actively attached tab).
+     */
+    internal fun wipeMultiProfileStorage(preserveProfileName: String?) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) return
+        runCatching {
+            val store = ProfileStore.getInstance()
+            val names = store.allProfileNames.toList()
+            for (name in names) {
+                if (name == Profile.DEFAULT_PROFILE_NAME) continue
+                runCatching {
+                    store.getProfile(name)?.let { profile ->
+                        runCatching { profile.webStorage.deleteAllData() }
+                        runCatching { profile.geolocationPermissions.clearAll() }
+                        runCatching {
+                            profile.cookieManager.apply {
+                                removeAllCookies(null)
+                                flush()
+                            }
+                        }
+                    }
+                }
+                if (name != preserveProfileName) {
+                    runCatching { store.deleteProfile(name) }
+                }
+            }
+        }
     }
 
     fun hideKeyboard(activity: Activity, focusView: View? = null) {

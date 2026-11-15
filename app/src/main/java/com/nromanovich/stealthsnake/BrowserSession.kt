@@ -10,17 +10,27 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class BrowserSession(
     val id: Long = nextId.getAndIncrement(),
-    var webView: WebView,
+    webView: WebView? = null,
     var sessionSeed: String = SnakeScript.generateSessionSeed()
 ) {
     val webViewProfileName: String = "tab_$id"
-    var isWebViewAttached: Boolean = true
+    lateinit var webView: WebView
+    var isWebViewAttached: Boolean = webView != null
     var lastActiveAtMs: Long = System.currentTimeMillis()
     var presetOverride: String? = null
     var profileIdOverride: String? = null
     var lastCrashRecoveryAtMs: Long = 0L
     var lastCrashUrl: String = ""
     var pendingRestoreUrl: String? = null
+    var errorUrl: String? = null
+    var errorDescription: String = ""
+    var errorCode: Int = -1
+
+    init {
+        if (webView != null) {
+            this.webView = webView
+        }
+    }
 
     lateinit var snakeClient: SnakeClient
     lateinit var snakeChrome: SnakeChrome
@@ -57,6 +67,9 @@ class BrowserSession(
         lastCrashRecoveryAtMs = 0L
         lastCrashUrl = ""
         pendingRestoreUrl = null
+        errorUrl = null
+        errorDescription = ""
+        errorCode = -1
         approvedHttpHosts.clear()
         resetPageSecurityState()
         currentUrl = MainActivity.DEFAULT_START_URL
@@ -65,5 +78,13 @@ class BrowserSession(
 
     companion object {
         private val nextId = AtomicLong(1L)
+
+        fun ensureNextIdAtLeast(minNextId: Long) {
+            while (true) {
+                val cur = nextId.get()
+                if (cur >= minNextId) return
+                if (nextId.compareAndSet(cur, minNextId)) return
+            }
+        }
     }
 }

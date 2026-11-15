@@ -1,6 +1,7 @@
 package com.nromanovich.stealthsnake
 
 import android.content.Context
+import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
@@ -23,6 +24,8 @@ import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowDialog
 import org.robolectric.shadows.ShadowLooper
+import java.io.ByteArrayInputStream
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -218,5 +221,104 @@ class PinLockSecurityTest {
             }
         }
         return null
+    }
+
+    @Test
+    fun `wipeAllSensitiveDataFromSecondary erases encrypted session store, temp uploads, and clears sessionDirty`() {
+        val prefs = SnakePreferences(ctx).apply {
+            autoWipeOnExit = true
+            sessionDirty = true
+        }
+        val sessionStore = EncryptedSessionStore(ctx)
+        sessionStore.saveTabs(
+            listOf(
+                EncryptedSessionStore.SavedTab(
+                    id = 7L,
+                    url = "https://confidential.example/doc",
+                    title = "Confidential",
+                    sessionSeed = "seed-7",
+                    presetOverride = null,
+                    profileIdOverride = null
+                )
+            ),
+            activeIndex = 0,
+            autoWipeOnExit = true
+        )
+        sessionStore.addBookmark("https://bookmark.example/", "Private Bookmark")
+
+        val uploadUri = Uri.parse("content://test.provider/secret_note.txt")
+        Shadows.shadowOf(ctx.contentResolver).registerInputStream(
+            uploadUri,
+            ByteArrayInputStream("confidential-draft".toByteArray(Charsets.UTF_8))
+        )
+        val sanitized = UploadSanitizer.sanitize(ctx, uploadUri) as UploadSanitizer.SanitizeResult.Success
+        val leakedUpload = File(sanitized.uri.path!!)
+        assertTrue(leakedUpload.exists())
+
+        PinLockCoordinator.wipeAllSensitiveDataFromSecondary(ctx)
+
+        val reloadedStore = EncryptedSessionStore(ctx)
+        assertNull(reloadedStore.loadTabs(autoWipeOnExit = true))
+        assertNull(reloadedStore.loadTabs(autoWipeOnExit = false))
+        assertTrue(reloadedStore.listBookmarks().isEmpty())
+        assertFalse(leakedUpload.exists())
+        assertFalse(prefs.sessionDirty)
+    }
+
+    @Test
+    fun `showPinLockOverlay dismisses tracked dialogs, closes reader mode, and blocks late reader extraction`() {
+        var nowMs = 1_000L
+        PinLockCoordinator.resetForTests { nowMs }
+        val prefs = SnakePreferences(ctx).apply {
+            onboardingCompleted = true
+            homeUrl = MainActivity.DEFAULT_START_URL
+        }
+        PinManager.setPin(prefs, "1234")
+
+        val ctrl = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = ctrl.get()
+        val rootFrame = activity.findViewById<ViewGroup>(R.id.rootFrame)
+        val pinOverlay = rootFrame.getChildAt(rootFrame.childCount - 1)
+        "1234".forEach { ch -> findTextViewWithText(pinOverlay, ch.toString())!!.performClick() }
+        findButtonWithText(pinOverlay, ctx.getString(R.string.pin_unlock))!!.performClick()
+        ShadowLooper.idleMainLooper()
+
+        val activeTab = activity.createNewSession(loadHome = false, switchTo = true)
+        val tabWebView = activity.findViewById<WebView>(R.id.webView)
+        tabWebView.loadUrl("https://auth.example/panel")
+        ShadowLooper.idleMainLooper()
+        tabWebView.webViewClient.onReceivedHttpAuthRequest(tabWebView, null, "auth.example", "Admin")
+        ShadowLooper.idleMainLooper()
+        val authDialog = ShadowDialog.getLatestDialog() as AlertDialog
+        assertTrue(authDialog.isShowing)
+
+        activity.handleExtractedReaderArticle(
+            activeTab,
+            activeTab.navigationGeneration,
+            ReaderModeHelper.Article("Article", "", listOf("Visible paragraph"))
+        )
+        ShadowLooper.idleMainLooper()
+        assertTrue(activity.isReaderOverlayOpenForTest())
+
+        // Simulate app backgrounding past auto-lock grace period, then resume.
+        ctrl.pause().stop()
+        nowMs += 6_000L
+        ctrl.restart().start().resume()
+        ShadowLooper.idleMainLooper()
+
+        assertTrue(PinLockCoordinator.isLocked(prefs))
+        assertFalse("Tracked transient dialogs must be dismissed on PIN lock", authDialog.isShowing)
+        assertFalse("Reader overlay must be closed on PIN lock", activity.isReaderOverlayOpenForTest())
+
+        // Late async reader extraction callback arriving while locked must be dropped.
+        activity.handleExtractedReaderArticle(
+            activeTab,
+            activeTab.navigationGeneration,
+            ReaderModeHelper.Article("Late", "", listOf("Must stay hidden"))
+        )
+        ShadowLooper.idleMainLooper()
+        assertFalse(activity.isReaderOverlayOpenForTest())
+
+        ctrl.pause().destroy()
     }
 }

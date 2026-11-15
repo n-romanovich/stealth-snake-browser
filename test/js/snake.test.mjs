@@ -1071,3 +1071,32 @@ test('window.open synchronously patches same-origin child windows', async () => 
   assert.equal(r.tz, 0);
   assert.equal(r.marked, true);
 });
+
+test('Element.prototype.append and innerHTML synchronously patch same-origin iframes', async () => {
+  const s = await snake(SEED_A);
+  const r = JSON.parse(await s.eval(`(() => {
+    const hostA = document.createElement('div');
+    const f1 = document.createElement('iframe');
+    document.body.append(hostA);
+    hostA.append(f1);
+    const w1 = window.frames[window.frames.length - 1];
+    const hostB = document.createElement('div');
+    document.body.append(hostB);
+    hostB.innerHTML = '<span>ok</span><iframe id="inner_f"></iframe>';
+    const w2 = window.frames[window.frames.length - 1];
+    return JSON.stringify({
+      ua1: w1.navigator.userAgent,
+      tz1: new w1.Date().getTimezoneOffset(),
+      marked1: Reflect.ownKeys(w1).some((k) => typeof k === 'symbol' && Symbol.keyFor(k) === 'ss.i'),
+      ua2: w2.navigator.userAgent,
+      tz2: new w2.Date().getTimezoneOffset(),
+      marked2: Reflect.ownKeys(w2).some((k) => typeof k === 'symbol' && Symbol.keyFor(k) === 'ss.i'),
+    });
+  })()`));
+  assert.ok(r.ua1.includes('Android 10; K'));
+  assert.equal(r.tz1, 0);
+  assert.equal(r.marked1, true);
+  assert.ok(r.ua2.includes('Android 10; K'));
+  assert.equal(r.tz2, 0);
+  assert.equal(r.marked2, true);
+});

@@ -255,6 +255,10 @@ class CapturesActivity : AppCompatActivity() {
                 holder.decodeFuture = runCatching {
                     decodeExecutor.submit {
                         val bmp = decodeSampledBitmap(file, 640, 640) ?: return@submit
+                        if (Thread.currentThread().isInterrupted) {
+                            bmp.recycle()
+                            return@submit
+                        }
                         thumbnailCache.put(cacheKey, bmp)
                         mainHandler.post {
                             if (!isDestroyed && !isFinishing && holder.preview.tag == cacheKey && !bmp.isRecycled) {
@@ -316,7 +320,7 @@ class CapturesActivity : AppCompatActivity() {
         BitmapFactory.decodeFile(file.absolutePath, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var inSampleSize = 1
-        while ((bounds.outHeight / inSampleSize) > reqHeight && (bounds.outWidth / inSampleSize) > reqWidth) {
+        while ((bounds.outHeight / inSampleSize) > reqHeight || (bounds.outWidth / inSampleSize) > reqWidth) {
             inSampleSize *= 2
         }
         val opts = BitmapFactory.Options().apply { this.inSampleSize = inSampleSize }

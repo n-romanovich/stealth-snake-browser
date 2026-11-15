@@ -65,6 +65,7 @@ class DownloadsActivity : AppCompatActivity() {
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var loadGeneration: Long = 0L
+    private var activeConfirmDialog: AlertDialog? = null
 
     private fun runIoTask(task: () -> Unit) {
         if (Build.FINGERPRINT.equals("robolectric", ignoreCase = true)) {
@@ -74,7 +75,15 @@ class DownloadsActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        activeConfirmDialog?.dismiss()
+        activeConfirmDialog = null
+        super.onPause()
+    }
+
     override fun onDestroy() {
+        activeConfirmDialog?.dismiss()
+        activeConfirmDialog = null
         ioExecutor.shutdownNow()
         mainHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
@@ -318,6 +327,7 @@ class DownloadsActivity : AppCompatActivity() {
     }
 
     private fun confirmOpenDownloadedFile(entry: DownloadHistoryStore.Entry) {
+        activeConfirmDialog?.dismiss()
         val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.downloads_open_warning_title)
             .setMessage(getString(R.string.downloads_open_warning_message, entry.fileName))
@@ -336,7 +346,11 @@ class DownloadsActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton(R.string.action_cancel, null)
+            .setOnDismissListener {
+                activeConfirmDialog = null
+            }
             .show()
+        activeConfirmDialog = dialog
         SnakeTheme.styleExpressiveDialog(dialog, prefs.themePalette)
     }
 

@@ -4,19 +4,25 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.RectF
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.roundToInt
 
 /**
  * Copies user-selected `content://` uploads into an isolated temporary directory with a
- * randomized filename, enforces a 50 MB size ceiling, and re-encodes raster images
- * (JPEG/PNG/WebP) to strip EXIF/GPS/XMP/camera metadata before handing the file to WebView.
+ * randomized filename, enforces a 50 MB size ceiling, blocks active/XML image payloads (SVG),
+ * and re-encodes raster images to normalize orientation and strip EXIF/GPS/XMP/camera metadata
+ * before handing the file to WebView.
  */
 object UploadSanitizer {
 
@@ -27,6 +33,9 @@ object UploadSanitizer {
     }
 
     const val MAX_UPLOAD_BYTES = 50L * 1024L * 1024L
+    internal const val MAX_IMAGE_PIXELS = 25_000_000L
+    private const val DOWNSAMPLE_THRESHOLD_PIXELS = 16_000_000L
+    private const val HEADER_SNIFF_BYTES = 512
     private const val UPLOAD_DIR = "uploads"
 
     fun sanitize(context: Context, sourceUri: Uri): SanitizeResult {
@@ -47,7 +56,7 @@ object UploadSanitizer {
 
         return runCatching {
             resolver.openInputStream(sourceUri)?.use { input ->
-                val header = ByteArray(16)
+                val header = ByteArray(HEADER_SNIFF_BYTES)
                 var headerLen = 0
                 while (headerLen < header.size) {
                     val n = input.read(header, headerLen, header.size - headerLen)
@@ -56,33 +65,70 @@ object UploadSanitizer {
                 }
                 if (headerLen == 0) return@runCatching SanitizeResult.Failed
 
+                if (isSvgUpload(header, headerLen, mime, rawName)) {
+                    return@runCatching SanitizeResult.Failed
+                }
+
                 val sniffedExt = sniffRasterImageExt(header, headerLen)
                 val metaExt = resolveExtension(mime, rawName)
-                val ext = sniffedExt ?: metaExt
-                val isRasterImage = sniffedExt != null ||
-                    mime == "image/jpeg" ||
-                    mime == "image/jpg" ||
-                    mime == "image/png" ||
-                    mime == "image/webp" ||
-                    ext in setOf("jpg", "jpeg", "png", "webp")
+                val isDeclaredImage = mime.startsWith("image/") ||
+                    metaExt in IMAGE_EXTENSIONS
+                val isRasterImage = sniffedExt != null || isDeclaredImage
 
-                val targetFile = File(dir, "upload_${randomStem}.$ext").also { outFile = it }
+                val outputExt = when {
+                    sniffedExt == "jpg" || sniffedExt == "png" || sniffedExt == "webp" -> sniffedExt
+                    sniffedExt != null -> "png"
+                    isRasterImage && (metaExt == "jpg" || metaExt == "jpeg") -> "jpg"
+                    isRasterImage && metaExt == "webp" -> "webp"
+                    isRasterImage -> "png"
+                    else -> metaExt
+                }
+
+                val targetFile = File(dir, "upload_${randomStem}.$outputExt").also { outFile = it }
 
                 if (isRasterImage) {
                     val rawBytes = readBoundedBytes(header, headerLen, input)
                         ?: return@runCatching SanitizeResult.TooLarge
-                    val decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, bounds)
+                    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                        return@runCatching SanitizeResult.Failed
+                    }
+                    val totalPixels = bounds.outWidth.toLong() * bounds.outHeight.toLong()
+                    if (totalPixels > MAX_IMAGE_PIXELS) {
+                        return@runCatching SanitizeResult.TooLarge
+                    }
+                    var sampleSize = 1
+                    if (totalPixels > DOWNSAMPLE_THRESHOLD_PIXELS) {
+                        while (((bounds.outWidth / sampleSize).toLong() * (bounds.outHeight / sampleSize).toLong()) >
+                            DOWNSAMPLE_THRESHOLD_PIXELS
+                        ) {
+                            sampleSize *= 2
+                        }
+                    }
+                    val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                    val decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, decodeOpts)
                         ?: return@runCatching SanitizeResult.Failed
-                    val clean = Bitmap.createBitmap(
-                        decoded.width.coerceAtLeast(1),
-                        decoded.height.coerceAtLeast(1),
-                        Bitmap.Config.ARGB_8888
-                    )
+
+                    val orientation = runCatching {
+                        ExifInterface(ByteArrayInputStream(rawBytes)).getAttributeInt(
+                            ExifInterface.TAG_ORIENTATION,
+                            ExifInterface.ORIENTATION_NORMAL
+                        )
+                    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+                    val matrix = orientationMatrix(orientation)
+                    val dstRect = RectF(0f, 0f, decoded.width.toFloat(), decoded.height.toFloat())
+                    matrix.mapRect(dstRect)
+                    matrix.postTranslate(-dstRect.left, -dstRect.top)
+                    val targetW = dstRect.width().roundToInt().coerceAtLeast(1)
+                    val targetH = dstRect.height().roundToInt().coerceAtLeast(1)
+
+                    val clean = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
                     try {
-                        Canvas(clean).drawBitmap(decoded, 0f, 0f, null)
-                        val format = when {
-                            ext == "png" || mime == "image/png" -> Bitmap.CompressFormat.PNG
-                            ext == "webp" || mime == "image/webp" -> compressFormatWebp()
+                        Canvas(clean).drawBitmap(decoded, matrix, null)
+                        val format = when (outputExt) {
+                            "png" -> Bitmap.CompressFormat.PNG
+                            "webp" -> compressFormatWebp()
                             else -> Bitmap.CompressFormat.JPEG
                         }
                         FileOutputStream(targetFile).use { out ->
@@ -128,6 +174,38 @@ object UploadSanitizer {
         }
     }
 
+    private val IMAGE_EXTENSIONS = setOf(
+        "jpg", "jpeg", "png", "webp", "heic", "heif", "avif", "gif", "bmp", "tif", "tiff"
+    )
+
+    private fun isSvgUpload(header: ByteArray, len: Int, mime: String, rawName: String?): Boolean {
+        if (mime.contains("svg")) return true
+        val lowerExt = rawName?.substringAfterLast('.', "")?.lowercase(Locale.ROOT)
+        if (lowerExt == "svg" || lowerExt == "svgz") return true
+        val preview = runCatching {
+            String(header, 0, len, Charsets.UTF_8).trimStart('\uFEFF', ' ', '\t', '\r', '\n').lowercase(Locale.ROOT)
+        }.getOrNull() ?: return false
+        return preview.startsWith("<svg") || (preview.startsWith("<?xml") && preview.contains("<svg"))
+    }
+
+    private fun orientationMatrix(orientation: Int): Matrix = Matrix().apply {
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> setScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                setRotate(90f)
+                postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                setRotate(270f)
+                postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> setRotate(270f)
+        }
+    }
+
     private fun sniffRasterImageExt(header: ByteArray, len: Int): String? {
         if (len >= 3 &&
             header[0] == 0xFF.toByte() &&
@@ -159,6 +237,35 @@ object UploadSanitizer {
             header[11] == 'P'.code.toByte()
         ) {
             return "webp"
+        }
+        if (len >= 6 &&
+            header[0] == 'G'.code.toByte() &&
+            header[1] == 'I'.code.toByte() &&
+            header[2] == 'F'.code.toByte() &&
+            header[3] == '8'.code.toByte() &&
+            (header[4] == '7'.code.toByte() || header[4] == '9'.code.toByte()) &&
+            header[5] == 'a'.code.toByte()
+        ) {
+            return "gif"
+        }
+        if (len >= 2 && header[0] == 'B'.code.toByte() && header[1] == 'M'.code.toByte()) {
+            return "bmp"
+        }
+        if (len >= 4 && (
+            (header[0] == 'I'.code.toByte() && header[1] == 'I'.code.toByte() && header[2] == 42.toByte() && header[3] == 0.toByte()) ||
+            (header[0] == 'M'.code.toByte() && header[1] == 'M'.code.toByte() && header[2] == 0.toByte() && header[3] == 42.toByte())
+        )) {
+            return "tiff"
+        }
+        if (len >= 12 &&
+            header[4] == 'f'.code.toByte() &&
+            header[5] == 't'.code.toByte() &&
+            header[6] == 'y'.code.toByte() &&
+            header[7] == 'p'.code.toByte()
+        ) {
+            val brand = String(header, 8, 4, Charsets.US_ASCII).lowercase(Locale.ROOT)
+            if (brand in setOf("heic", "heix", "hevc", "hevx", "mif1", "msf1")) return "heic"
+            if (brand == "avif" || brand == "avis") return "avif"
         }
         return null
     }

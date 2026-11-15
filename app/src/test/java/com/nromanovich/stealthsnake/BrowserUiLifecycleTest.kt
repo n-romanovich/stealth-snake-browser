@@ -22,6 +22,9 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
+import java.nio.ByteBuffer
+import java.util.zip.CRC32
+import java.util.zip.DeflaterOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -222,7 +225,7 @@ class BrowserUiLifecycleTest {
     }
 
     @Test
-    fun `main frame network error displays errorOverlay and retry clears it`() {
+    fun `main frame network error displays errorOverlay and preserves across tab switch until retry or back`() {
         val prefs = SnakePreferences(ctx)
         prefs.homeUrl = MainActivity.DEFAULT_START_URL
         prefs.startHintDismissed = false
@@ -231,7 +234,9 @@ class BrowserUiLifecycleTest {
         val activity = ctrl.get()
         val webView = activity.findViewById<WebView>(R.id.webView)
         val errorOverlay = activity.findViewById<View>(R.id.errorOverlay)
+        val errorOverlayBody = activity.findViewById<TextView>(R.id.errorOverlayBody)
         val startPageCard = activity.findViewById<View>(R.id.startPageCard)
+        val urlInput = activity.findViewById<EditText>(R.id.urlInput)
 
         val request = object : WebResourceRequest {
             override fun getUrl(): Uri = Uri.parse("https://down.example/article")
@@ -244,18 +249,133 @@ class BrowserUiLifecycleTest {
         webView.webViewClient.onReceivedError(webView, request, null)
         ShadowLooper.idleMainLooper()
 
+        val expectedFormatted = activity.getString(
+            R.string.error_page_message,
+            activity.getString(R.string.error_page_title),
+            -1
+        )
         assertEquals(View.VISIBLE, errorOverlay.visibility)
         assertEquals(View.GONE, startPageCard.visibility)
-        assertTrue(
-            activity.findViewById<TextView>(R.id.errorOverlayBody).text.toString()
-                .contains(activity.getString(R.string.error_page_message))
-        )
+        assertEquals(expectedFormatted, errorOverlayBody.text.toString())
+        assertTrue(urlInput.text.toString().contains("down.example/article"))
 
+        // Switching to a new tab hides errorOverlay; closing it restores tab 0's errorOverlay.
+        val secondTab = activity.createNewSession(loadHome = false, switchTo = true)
+        ShadowLooper.idleMainLooper()
+        assertEquals(View.GONE, errorOverlay.visibility)
+
+        activity.closeSession(secondTab)
+        ShadowLooper.idleMainLooper()
+        assertEquals(View.VISIBLE, errorOverlay.visibility)
+        assertEquals(expectedFormatted, errorOverlayBody.text.toString())
+        assertTrue(urlInput.text.toString().contains("down.example/article"))
+
+        // Retry clears errorOverlay cleanly.
         activity.findViewById<View>(R.id.btnErrorRetry).performClick()
         ShadowLooper.idleMainLooper()
         assertEquals(View.GONE, errorOverlay.visibility)
 
+        // Pressing Back dismisses errorOverlay when WebView history is empty.
+        webView.webViewClient.onReceivedError(webView, request, null)
+        ShadowLooper.idleMainLooper()
+        assertEquals(View.VISIBLE, errorOverlay.visibility)
+        activity.onBackPressedDispatcher.onBackPressed()
+        ShadowLooper.idleMainLooper()
+        assertEquals(View.GONE, errorOverlay.visibility)
+        assertEquals(View.VISIBLE, startPageCard.visibility)
+
         ctrl.pause().destroy()
+    }
+
+    @Test
+    fun `promptHttpAuth formats 2-arg message with host and realm`() {
+        SnakePreferences(ctx).apply {
+            homeUrl = MainActivity.DEFAULT_START_URL
+            startHintDismissed = true
+        }
+        val ctrl = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = ctrl.get()
+        val webView = activity.findViewById<WebView>(R.id.webView)
+
+        webView.loadUrl("https://auth.example/admin")
+        ShadowLooper.idleMainLooper()
+
+        webView.webViewClient.onReceivedHttpAuthRequest(webView, null, "auth.example", "Restricted Zone")
+        ShadowLooper.idleMainLooper()
+
+        val dialog = ShadowAlertDialog.getLatestDialog() as AlertDialog
+        assertTrue(dialog.isShowing)
+        val message = dialog.findViewById<TextView>(android.R.id.message)?.text?.toString().orEmpty()
+        assertEquals(
+            activity.getString(R.string.http_auth_message, "auth.example", "Restricted Zone"),
+            message
+        )
+        assertTrue(message.contains("auth.example"))
+        assertTrue(message.contains("Restricted Zone"))
+
+        dialog.dismiss()
+        ctrl.pause().destroy()
+    }
+
+    @Test
+    fun `UploadSanitizer rejects SVG payloads and oversized pixel dimensions`() {
+        val resolver = Shadows.shadowOf(ctx.contentResolver)
+
+        val svgBytes = "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"
+            .toByteArray(Charsets.UTF_8)
+        val svgUri = Uri.parse("content://test.provider/vector.svg")
+        resolver.registerInputStream(svgUri, ByteArrayInputStream(svgBytes))
+        assertEquals(UploadSanitizer.SanitizeResult.Failed, UploadSanitizer.sanitize(ctx, svgUri))
+
+        val disguisedSvgUri = Uri.parse("content://test.provider/disguised.png")
+        resolver.registerInputStream(disguisedSvgUri, ByteArrayInputStream(svgBytes))
+        assertEquals(UploadSanitizer.SanitizeResult.Failed, UploadSanitizer.sanitize(ctx, disguisedSvgUri))
+
+        val bombPng = buildMinimalValidPng(width = 5_001, height = 5_001)
+        val bombUri = Uri.parse("content://test.provider/pixel_bomb.png")
+        resolver.registerInputStream(bombUri, ByteArrayInputStream(bombPng))
+        assertEquals(UploadSanitizer.SanitizeResult.TooLarge, UploadSanitizer.sanitize(ctx, bombUri))
+
+        UploadSanitizer.clearTempUploads(ctx)
+    }
+
+    private fun buildMinimalValidPng(width: Int, height: Int): ByteArray {
+        val ihdrData = ByteBuffer.allocate(13)
+            .putInt(width)
+            .putInt(height)
+            .put(1.toByte()) // bit depth: 1-bit grayscale
+            .put(0.toByte()) // color type: grayscale
+            .put(0.toByte()) // compression: deflate
+            .put(0.toByte()) // filter: adaptive
+            .put(0.toByte()) // interlace: none
+            .array()
+        val idatBaos = ByteArrayOutputStream()
+        DeflaterOutputStream(idatBaos).use { deflater ->
+            val row = ByteArray(1 + (width + 7) / 8)
+            repeat(height) {
+                deflater.write(row)
+            }
+        }
+        val idatData = idatBaos.toByteArray()
+
+        return ByteArrayOutputStream().apply {
+            write(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A))
+            writePngChunk(this, "IHDR", ihdrData)
+            writePngChunk(this, "IDAT", idatData)
+            writePngChunk(this, "IEND", ByteArray(0))
+        }.toByteArray()
+    }
+
+    private fun writePngChunk(out: ByteArrayOutputStream, type: String, data: ByteArray) {
+        val typeBytes = type.toByteArray(Charsets.US_ASCII)
+        val crc = CRC32().apply {
+            update(typeBytes)
+            update(data)
+        }.value.toInt()
+        out.write(ByteBuffer.allocate(4).putInt(data.size).array())
+        out.write(typeBytes)
+        out.write(data)
+        out.write(ByteBuffer.allocate(4).putInt(crc).array())
     }
 
     @Test

@@ -408,6 +408,8 @@
                     android:id="@+id/errorOverlayIcon"
                     android:layout_width="40dp"
                     android:layout_height="40dp"
+                    android:importantForAccessibility="no"
+                    android:contentDescription="@null"
                     android:src="@drawable/ic_info_outline" />
 
                 <TextView

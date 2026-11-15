@@ -1761,12 +1761,68 @@
       }
       return false;
     }
+    function htmlMayContainFrame(html) {
+      return typeof html === 'string' && /<(?:iframe|frame)\b/i.test(html);
+    }
     const NodeCtor = G.Node || (typeof Node === 'function' ? Node : null);
     if (NodeCtor && NodeCtor.prototype) {
       for (const method of ['appendChild', 'insertBefore', 'replaceChild']) {
         if (typeof NodeCtor.prototype[method] === 'function') {
           replaceMethod(NodeCtor.prototype, method, (orig, self, args) => {
             const scan = nodeMayContainFrame(args[0]);
+            const res = apply(orig, self, args);
+            if (scan) patchFramesCollection();
+            return res;
+          });
+        }
+      }
+    }
+    const ElemCtor = G.Element || (typeof Element === 'function' ? Element : null);
+    if (ElemCtor && ElemCtor.prototype) {
+      for (const method of ['append', 'prepend', 'before', 'after', 'replaceWith']) {
+        if (typeof ElemCtor.prototype[method] === 'function') {
+          replaceMethod(ElemCtor.prototype, method, (orig, self, args) => {
+            let scan = false;
+            for (let i = 0; i < args.length; i++) {
+              if (nodeMayContainFrame(args[i])) { scan = true; break; }
+            }
+            const res = apply(orig, self, args);
+            if (scan) patchFramesCollection();
+            return res;
+          });
+        }
+      }
+      if (typeof ElemCtor.prototype.insertAdjacentElement === 'function') {
+        replaceMethod(ElemCtor.prototype, 'insertAdjacentElement', (orig, self, args) => {
+          const scan = nodeMayContainFrame(args[1]);
+          const res = apply(orig, self, args);
+          if (scan) patchFramesCollection();
+          return res;
+        });
+      }
+      if (typeof ElemCtor.prototype.insertAdjacentHTML === 'function') {
+        replaceMethod(ElemCtor.prototype, 'insertAdjacentHTML', (orig, self, args) => {
+          const scan = htmlMayContainFrame(args[1]);
+          const res = apply(orig, self, args);
+          if (scan) patchFramesCollection();
+          return res;
+        });
+      }
+      replaceSetter(ElemCtor.prototype, 'innerHTML', (origSet, self, v) => {
+        const scan = htmlMayContainFrame(v);
+        apply(origSet, self, [v]);
+        if (scan) patchFramesCollection();
+      });
+    }
+    const DocCtor = G.Document || (typeof Document === 'function' ? Document : null);
+    if (DocCtor && DocCtor.prototype) {
+      for (const method of ['write', 'writeln']) {
+        if (typeof DocCtor.prototype[method] === 'function') {
+          replaceMethod(DocCtor.prototype, method, (orig, self, args) => {
+            let scan = false;
+            for (let i = 0; i < args.length; i++) {
+              if (htmlMayContainFrame(args[i])) { scan = true; break; }
+            }
             const res = apply(orig, self, args);
             if (scan) patchFramesCollection();
             return res;

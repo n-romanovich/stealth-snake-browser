@@ -34,9 +34,11 @@ import java.util.Collections
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLSocketFactory
@@ -48,7 +50,13 @@ import javax.net.ssl.SSLSocketFactory
 class DownloadHelper(
     context: Context,
     private val mainHandler: Handler = Handler(Looper.getMainLooper()),
-    private val executor: ExecutorService = Executors.newFixedThreadPool(3),
+    private val executor: ExecutorService = ThreadPoolExecutor(
+        3,
+        3,
+        60L,
+        TimeUnit.SECONDS,
+        LinkedBlockingQueue(32)
+    ),
     private val vpnKillSwitchEnabled: () -> Boolean = { false },
     private val isVpnActive: () -> Boolean = { VpnGuard.isVpnActive(context.applicationContext) },
     private val isUrlBlocked: (String) -> Boolean = { false },
@@ -94,48 +102,40 @@ class DownloadHelper(
         val effectiveMime = mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
         val taskGen = cancellationGeneration.get()
 
-        try {
-            var futureRef: Future<*>? = null
-            futureRef = executor.submit {
-                var savedMeta = SavedResult(fileName)
-                val result = try {
-                    checkNotCancelled(taskGen)
-                    val conn = openGuardedConnection(url, userAgent, taskGen)
-                    val saved = try {
-                        val stream = conn.inputStream
-                        activeStreams.add(stream)
-                        try {
-                            saveStream(stream, fileName, effectiveMime, taskGen)
-                        } finally {
-                            activeStreams.remove(stream)
-                        }
+        submitCancellableTask(taskGen, onComplete) {
+            var savedMeta = SavedResult(fileName)
+            val result = try {
+                checkNotCancelled(taskGen)
+                val conn = openGuardedConnection(url, userAgent, taskGen)
+                val saved = try {
+                    val stream = conn.inputStream
+                    activeStreams.add(stream)
+                    try {
+                        saveStream(stream, fileName, effectiveMime, taskGen)
                     } finally {
-                        conn.disconnect()
+                        activeStreams.remove(stream)
                     }
-                    savedMeta = saved
-                    Result.success(saved.fileName)
-                } catch (t: Throwable) {
-                    Result.failure(t)
                 } finally {
-                    futureRef?.let { activeFutures.remove(it) }
+                    conn.disconnect()
                 }
-                if (taskGen == cancellationGeneration.get() &&
-                    (result.isSuccess || result.exceptionOrNull() !is SecurityException)
-                ) {
-                    historyStore.record(
-                        fileName = savedMeta.fileName,
-                        mimeType = effectiveMime,
-                        success = result.isSuccess,
-                        uriString = savedMeta.uriString,
-                        filePath = savedMeta.filePath,
-                        sizeBytes = savedMeta.sizeBytes
-                    )
-                }
-                mainHandler.post { onComplete(result) }
+                savedMeta = saved
+                Result.success(saved.fileName)
+            } catch (t: Throwable) {
+                Result.failure(t)
             }
-            activeFutures.add(futureRef)
-        } catch (_: RejectedExecutionException) {
-            mainHandler.post { onComplete(Result.failure(IllegalStateException("Downloader shut down"))) }
+            if (taskGen == cancellationGeneration.get() &&
+                (result.isSuccess || result.exceptionOrNull() !is SecurityException)
+            ) {
+                historyStore.record(
+                    fileName = savedMeta.fileName,
+                    mimeType = effectiveMime,
+                    success = result.isSuccess,
+                    uriString = savedMeta.uriString,
+                    filePath = savedMeta.filePath,
+                    sizeBytes = savedMeta.sizeBytes
+                )
+            }
+            mainHandler.post { onComplete(result) }
         }
     }
 
@@ -143,6 +143,16 @@ class DownloadHelper(
         dataUri: String,
         contentDisposition: String?,
         mimeType: String?,
+        onComplete: (Result<String>) -> Unit
+    ) {
+        enqueueDataUriDownload(dataUri, contentDisposition, mimeType, cancellationGeneration.get(), onComplete)
+    }
+
+    private fun enqueueDataUriDownload(
+        dataUri: String,
+        contentDisposition: String?,
+        mimeType: String?,
+        taskGen: Long,
         onComplete: (Result<String>) -> Unit
     ) {
         if (!dataUri.lowercase(Locale.ROOT).startsWith("data:")) {
@@ -153,48 +163,75 @@ class DownloadHelper(
             mainHandler.post { onComplete(Result.failure(SecurityException("Blocked by VPN Kill-Switch"))) }
             return
         }
-        val taskGen = cancellationGeneration.get()
-        try {
-            var futureRef: Future<*>? = null
-            futureRef = executor.submit {
-                var effectiveMime = mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
-                var fileName = "download_${System.currentTimeMillis()}"
-                var savedMeta = SavedResult(fileName)
-                val result = try {
-                    checkNotCancelled(taskGen)
-                    val (decodedMime, bytes) = decodeDataUri(dataUri, mimeType)
-                    effectiveMime = decodedMime
-                    val suggested = contentDisposition?.let { URLUtil.guessFileName("https://local.invalid/", it, decodedMime) }
-                        ?.takeIf { !it.equals("downloadfile.bin", ignoreCase = true) }
-                    val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(decodedMime)
-                    val fallbackName = if (!ext.isNullOrBlank()) "download_${System.currentTimeMillis()}.$ext" else fileName
-                    fileName = sanitizeFileName(suggested ?: fallbackName)
-                    savedMeta = SavedResult(fileName)
-                    val saved = saveStream(ByteArrayInputStream(bytes), fileName, effectiveMime, taskGen)
-                    savedMeta = saved
-                    Result.success(saved.fileName)
-                } catch (t: Throwable) {
-                    Result.failure(t)
-                } finally {
-                    futureRef?.let { activeFutures.remove(it) }
-                }
-                if (taskGen == cancellationGeneration.get() &&
-                    (result.isSuccess || result.exceptionOrNull() !is SecurityException)
-                ) {
-                    historyStore.record(
-                        fileName = savedMeta.fileName,
-                        mimeType = effectiveMime,
-                        success = result.isSuccess,
-                        uriString = savedMeta.uriString,
-                        filePath = savedMeta.filePath,
-                        sizeBytes = savedMeta.sizeBytes
-                    )
-                }
-                mainHandler.post { onComplete(result) }
+        if (taskGen != cancellationGeneration.get()) {
+            mainHandler.post { onComplete(Result.failure(InterruptedIOException("Download cancelled"))) }
+            return
+        }
+        submitCancellableTask(taskGen, onComplete) {
+            var effectiveMime = mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
+            var fileName = "download_${System.currentTimeMillis()}"
+            var savedMeta = SavedResult(fileName)
+            val result = try {
+                checkNotCancelled(taskGen)
+                val (decodedMime, bytes) = decodeDataUri(dataUri, mimeType)
+                effectiveMime = decodedMime
+                val suggested = contentDisposition?.let { URLUtil.guessFileName("https://local.invalid/", it, decodedMime) }
+                    ?.takeIf { !it.equals("downloadfile.bin", ignoreCase = true) }
+                val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(decodedMime)
+                val fallbackName = if (!ext.isNullOrBlank()) "download_${System.currentTimeMillis()}.$ext" else fileName
+                fileName = sanitizeFileName(suggested ?: fallbackName)
+                savedMeta = SavedResult(fileName)
+                val saved = saveStream(ByteArrayInputStream(bytes), fileName, effectiveMime, taskGen)
+                savedMeta = saved
+                Result.success(saved.fileName)
+            } catch (t: Throwable) {
+                Result.failure(t)
             }
-            activeFutures.add(futureRef)
+            if (taskGen == cancellationGeneration.get() &&
+                (result.isSuccess || result.exceptionOrNull() !is SecurityException)
+            ) {
+                historyStore.record(
+                    fileName = savedMeta.fileName,
+                    mimeType = effectiveMime,
+                    success = result.isSuccess,
+                    uriString = savedMeta.uriString,
+                    filePath = savedMeta.filePath,
+                    sizeBytes = savedMeta.sizeBytes
+                )
+            }
+            mainHandler.post { onComplete(result) }
+        }
+    }
+
+    private fun submitCancellableTask(
+        taskGen: Long,
+        onComplete: (Result<String>) -> Unit,
+        block: () -> Unit
+    ) {
+        try {
+            synchronized(activeFutures) {
+                if (taskGen != cancellationGeneration.get()) {
+                    mainHandler.post { onComplete(Result.failure(InterruptedIOException("Download cancelled"))) }
+                    return
+                }
+                var futureRef: Future<*>? = null
+                futureRef = executor.submit {
+                    try {
+                        block()
+                    } finally {
+                        synchronized(activeFutures) {
+                            futureRef?.let { activeFutures.remove(it) }
+                        }
+                    }
+                }
+                if (taskGen == cancellationGeneration.get()) {
+                    futureRef?.let { activeFutures.add(it) }
+                } else {
+                    futureRef?.cancel(true)
+                }
+            }
         } catch (_: RejectedExecutionException) {
-            mainHandler.post { onComplete(Result.failure(IllegalStateException("Downloader shut down"))) }
+            mainHandler.post { onComplete(Result.failure(IllegalStateException("Downloader queue full or shut down"))) }
         }
     }
 
@@ -250,7 +287,17 @@ class DownloadHelper(
         """.trimIndent()
 
         mainHandler.post {
+            if (taskGen != cancellationGeneration.get()) {
+                onComplete(Result.failure(InterruptedIOException("Download cancelled")))
+                return@post
+            }
             webView.evaluateJavascript(script) { initial ->
+                if (taskGen != cancellationGeneration.get()) {
+                    val cleanup = "try{delete window[${JSONObject.quote(token)}]}catch(e){}"
+                    runCatching { webView.evaluateJavascript(cleanup, null) }
+                    onComplete(Result.failure(InterruptedIOException("Download cancelled")))
+                    return@evaluateJavascript
+                }
                 val cleanedInit = initial?.trim()?.trim('"').orEmpty()
                 if (cleanedInit.startsWith("err:")) {
                     onComplete(Result.failure(IOException(cleanedInit.removePrefix("err:"))))
@@ -297,6 +344,12 @@ class DownloadHelper(
                 return@postDelayed
             }
             webView.evaluateJavascript(pollScript) { raw ->
+                if (taskGen != cancellationGeneration.get()) {
+                    val cleanup = "try{delete window[${JSONObject.quote(token)}]}catch(e){}"
+                    runCatching { webView.evaluateJavascript(cleanup, null) }
+                    onComplete(Result.failure(InterruptedIOException("Download cancelled")))
+                    return@evaluateJavascript
+                }
                 val value = runCatching {
                     JSONObject("""{"v":$raw}""").optString("v", "")
                 }.getOrNull() ?: raw?.trim('"').orEmpty()
@@ -304,7 +357,7 @@ class DownloadHelper(
                     value == "pending" || value.isEmpty() ->
                         pollBlobResult(webView, token, contentDisposition, mimeType, taskGen, attempt + 1, onComplete)
                     value.startsWith("ok:") ->
-                        downloadDataUri(value.removePrefix("ok:"), contentDisposition, mimeType, onComplete)
+                        enqueueDataUriDownload(value.removePrefix("ok:"), contentDisposition, mimeType, taskGen, onComplete)
                     value.startsWith("err:") ->
                         onComplete(Result.failure(IOException(value.removePrefix("err:"))))
                     else ->
@@ -589,7 +642,8 @@ class DownloadHelper(
         }
 
         private fun decodePercentEncodedBytes(input: String): ByteArray {
-            val out = ByteArrayOutputStream(input.length)
+            val out = ByteArrayOutputStream(minOf(input.length, 64 * 1024))
+            var written = 0L
             var i = 0
             while (i < input.length) {
                 val c = input[i]
@@ -597,12 +651,20 @@ class DownloadHelper(
                     val hi = Character.digit(input[i + 1], 16)
                     val lo = Character.digit(input[i + 2], 16)
                     if (hi >= 0 && lo >= 0) {
+                        written++
+                        if (written > MAX_INLINE_DOWNLOAD_BYTES) {
+                            throw IOException("Data URI exceeds 50 MB limit")
+                        }
                         out.write((hi shl 4) or lo)
                         i += 3
                         continue
                     }
                 }
                 val chBytes = c.toString().toByteArray(Charsets.UTF_8)
+                written += chBytes.size
+                if (written > MAX_INLINE_DOWNLOAD_BYTES) {
+                    throw IOException("Data URI exceeds 50 MB limit")
+                }
                 out.write(chBytes, 0, chBytes.size)
                 i++
             }

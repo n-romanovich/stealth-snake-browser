@@ -88,13 +88,14 @@ object ReaderModeHelper {
             }
 
             var blocks = [];
-            var seen = {};
+            var seen = Object.create(null);
             var nodes = best ? best.querySelectorAll('h1, h2, h3, h4, h5, h6, pre, code, table, blockquote, li, p') : [];
             for (var k = 0; k < nodes.length; k++) {
               var n = nodes[k];
               if (!isVisible(n)) continue;
               if (n.closest && n.closest('nav, header, footer, aside')) continue;
               var tag = n.tagName;
+              if (tag === 'TABLE' && n.parentElement && n.parentElement.closest && n.parentElement.closest('table')) continue;
               if (tag !== 'TABLE' && n.closest && n.closest('table')) continue;
               if (tag === 'PRE' && n.parentElement && n.parentElement.closest && n.parentElement.closest('pre')) continue;
               if (tag !== 'PRE' && n.closest && n.closest('pre')) continue;
@@ -119,11 +120,10 @@ object ReaderModeHelper {
                 continue;
               }
               if (tag === 'PRE' || tag === 'CODE') {
-                var codeText = (n.textContent || '').replace(/\r\n/g, '\n').trim();
-                if (tag === 'CODE' && n.closest && n.closest('p, li, h1, h2, h3, h4, h5, h6, blockquote') &&
-                    codeText.indexOf('\n') === -1 && codeText.length < 40) {
+                if (tag === 'CODE' && n.closest && n.closest('p, li, h1, h2, h3, h4, h5, h6, blockquote')) {
                   continue;
                 }
+                var codeText = (n.textContent || '').replace(/\r\n/g, '\n').trim();
                 if (codeText.length < 4 || seen['code:' + codeText]) continue;
                 seen['code:' + codeText] = true;
                 blocks.push({ kind: 'code', text: codeText });
