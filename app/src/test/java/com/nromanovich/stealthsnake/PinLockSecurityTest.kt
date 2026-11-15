@@ -719,4 +719,88 @@ class PinLockSecurityTest {
         assertEquals(View.VISIBLE, act.findViewById<View>(R.id.rootContainer).visibility)
         ctrl.pause().destroy()
     }
+
+    @Test
+    fun `5 failed attempts with LOCK_FOREVER triggers irreversible hard lock and shows hard-lock UI`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = SnakePreferences(ctx)
+        PinManager.setPin(prefs, "4321")
+        prefs.commitPinFailurePolicy(PinFailureAction.LOCK_FOREVER, autoWipeOnFail = true)
+
+        repeat(4) {
+            val res = PinManager.verifyPin(prefs, "0000")
+            assertTrue(res is PinManager.VerifyResult.Failed)
+            assertFalse(prefs.pinHardLocked)
+        }
+
+        val fifth = PinManager.verifyPin(prefs, "0000")
+        assertEquals(PinManager.VerifyResult.TriggerHardLock, fifth)
+        assertTrue(prefs.pinHardLocked)
+
+        // Even the correct PIN cannot unlock once hard-locked
+        assertEquals(PinManager.VerifyResult.TriggerHardLock, PinManager.verifyPin(prefs, "4321"))
+
+        // Resetting defaults with preservePin=true and markUnlocked() cannot bypass hard lock
+        prefs.resetToDefaults(preservePin = true)
+        assertTrue(prefs.pinHardLocked)
+        assertEquals(PinFailureAction.LOCK_FOREVER, prefs.pinFailureAction)
+        PinLockCoordinator.markUnlocked()
+        assertTrue(PinLockCoordinator.isLocked(prefs))
+
+        // Overlay renders Hard-Lock UI without keypad/Unlock button
+        val ctrl = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val act = ctrl.get()
+        ShadowLooper.idleMainLooper()
+        val rootFrame = act.findViewById<android.widget.FrameLayout>(R.id.rootFrame)
+        val pinOverlay = rootFrame.getChildAt(rootFrame.childCount - 1)
+        assertNotNull(findTextViewWithText(pinOverlay, ctx.getString(R.string.pin_hard_lock_title)))
+        assertNotNull(findButtonWithText(pinOverlay, ctx.getString(R.string.pin_hard_lock_open_settings)))
+        assertNull(findButtonWithText(pinOverlay, ctx.getString(R.string.pin_unlock)))
+        assertEquals(View.INVISIBLE, act.findViewById<View>(R.id.rootContainer).visibility)
+        ctrl.pause().destroy()
+    }
+
+    @Test
+    fun `setting PIN opens failure action policy dialog and commits selected action`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = SnakePreferences(ctx)
+        val ctrl = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        val act = ctrl.get()
+        PinLockCoordinator.markUnlocked()
+
+        var savedCalled = false
+        val setupDlg = PinDialogHelper.showSetPinDialog(act, prefs) {
+            savedCalled = true
+        }
+        ShadowLooper.idleMainLooper()
+
+        val edits = mutableListOf<android.widget.EditText>()
+        fun collectEdits(v: View) {
+            if (v is android.widget.EditText) edits.add(v)
+            if (v is android.view.ViewGroup) {
+                for (i in 0 until v.childCount) collectEdits(v.getChildAt(i))
+            }
+        }
+        collectEdits(setupDlg.window!!.decorView)
+        edits[0].setText("1357")
+        edits[1].setText("1357")
+        setupDlg.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).performClick()
+        ShadowLooper.idleMainLooper()
+
+        assertTrue("onPinSaved should update caller UI immediately upon PIN commit", savedCalled)
+        assertTrue(prefs.pinPolicySelectionPending)
+
+        // Second dialog (policy picker) is now showing on top
+        val policyDlg = org.robolectric.shadows.ShadowAlertDialog.getLatestDialog() as androidx.appcompat.app.AlertDialog
+        assertTrue(policyDlg.isShowing)
+        val lockOption = findTextViewWithText(policyDlg.window!!.decorView, ctx.getString(R.string.pin_failure_lock_title))!!
+        (lockOption.parent.parent as View).performClick()
+        policyDlg.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).performClick()
+        ShadowLooper.idleMainLooper()
+
+        assertFalse(prefs.pinPolicySelectionPending)
+        assertEquals(PinFailureAction.LOCK_FOREVER, prefs.pinFailureAction)
+        assertTrue(prefs.pinAutoWipeOnFail)
+        ctrl.pause().destroy()
+    }
 }

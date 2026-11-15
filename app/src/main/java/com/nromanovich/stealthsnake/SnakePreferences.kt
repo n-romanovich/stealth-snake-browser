@@ -55,6 +55,16 @@ enum class ProtectionPreset(val key: String) {
     }
 }
 
+enum class PinFailureAction(val key: String) {
+    WIPE_SESSION("wipe_session"),
+    LOCK_FOREVER("lock_forever");
+
+    companion object {
+        fun fromKey(key: String?): PinFailureAction =
+            entries.firstOrNull { it.key == key } ?: WIPE_SESSION
+    }
+}
+
 data class SnakeProfile(
     val id: String,
     val name: String,
@@ -381,6 +391,40 @@ class SnakePreferences(context: Context) {
             .putLong(KEY_PIN_LOCKOUT_STARTED_AT, 0L)
             .putLong(KEY_PIN_LOCKOUT_UNTIL, 0L)
             .putBoolean(KEY_PIN_AUTO_WIPE_PENDING, false)
+            .putBoolean(KEY_PIN_HARD_LOCKED, false)
+            .putBoolean(KEY_PIN_POLICY_SELECTION_PENDING, false)
+            .commit()
+    }
+
+    /**
+     * Atomically arms a permanent hard lock on disk so restarting, killing the process,
+     * or changing device time cannot bypass the 5-attempt limit.
+     */
+    fun commitHardLocked() {
+        prefs.edit()
+            .putBoolean(KEY_PIN_HARD_LOCKED, true)
+            .putBoolean(KEY_PIN_AUTO_WIPE_PENDING, false)
+            .putInt(KEY_PIN_FAILED_ATTEMPTS, 0)
+            .commit()
+    }
+
+    var pinHardLocked: Boolean
+        get() = prefs.getBoolean(KEY_PIN_HARD_LOCKED, false)
+        set(value) { prefs.edit().putBoolean(KEY_PIN_HARD_LOCKED, value).commit() }
+
+    var pinFailureAction: PinFailureAction
+        get() = PinFailureAction.fromKey(prefs.getString(KEY_PIN_FAILURE_ACTION, PinFailureAction.WIPE_SESSION.key))
+        set(value) { prefs.edit().putString(KEY_PIN_FAILURE_ACTION, value.key).commit() }
+
+    var pinPolicySelectionPending: Boolean
+        get() = prefs.getBoolean(KEY_PIN_POLICY_SELECTION_PENDING, false)
+        set(value) { prefs.edit().putBoolean(KEY_PIN_POLICY_SELECTION_PENDING, value).commit() }
+
+    fun commitPinFailurePolicy(action: PinFailureAction, autoWipeOnFail: Boolean = true) {
+        prefs.edit()
+            .putString(KEY_PIN_FAILURE_ACTION, action.key)
+            .putBoolean(KEY_PIN_AUTO_WIPE_ON_FAIL, autoWipeOnFail)
+            .putBoolean(KEY_PIN_POLICY_SELECTION_PENDING, false)
             .commit()
     }
 
@@ -628,6 +672,8 @@ class SnakePreferences(context: Context) {
             val savedKeyAlias = if (keepPin) pinKeyAlias else ""
             oldAliasToDelete = if (!keepPin) pinKeyAlias else ""
             val savedAutoWipe = if (keepPin) pinAutoWipeOnFail else true
+            val savedFailureAction = if (keepPin) pinFailureAction.key else PinFailureAction.WIPE_SESSION.key
+            val savedHardLocked = if (keepPin) pinHardLocked else false
             val savedAttempts = if (keepPin) pinFailedAttempts else 0
             val savedLockoutStart = if (keepPin) pinLockoutStartedAtMs else 0L
             val savedLockoutUntil = if (keepPin) pinLockoutUntilMs else 0L
@@ -647,6 +693,8 @@ class SnakePreferences(context: Context) {
                     .putInt(KEY_PIN_VERSION, savedVersion)
                     .putString(KEY_PIN_KEY_ALIAS, savedKeyAlias)
                     .putBoolean(KEY_PIN_AUTO_WIPE_ON_FAIL, savedAutoWipe)
+                    .putString(KEY_PIN_FAILURE_ACTION, savedFailureAction)
+                    .putBoolean(KEY_PIN_HARD_LOCKED, savedHardLocked)
                     .putInt(KEY_PIN_FAILED_ATTEMPTS, savedAttempts)
                     .putLong(KEY_PIN_LOCKOUT_STARTED_AT, savedLockoutStart)
                     .putLong(KEY_PIN_LOCKOUT_UNTIL, savedLockoutUntil)
@@ -889,6 +937,9 @@ class SnakePreferences(context: Context) {
         private const val KEY_PIN_KEY_ALIAS = "pin_key_alias"
         private const val KEY_PIN_AUTO_WIPE_ON_FAIL = "pin_auto_wipe_on_fail"
         private const val KEY_PIN_AUTO_WIPE_PENDING = "pin_auto_wipe_pending"
+        private const val KEY_PIN_FAILURE_ACTION = "pin_failure_action"
+        private const val KEY_PIN_HARD_LOCKED = "pin_hard_locked"
+        private const val KEY_PIN_POLICY_SELECTION_PENDING = "pin_policy_selection_pending"
         private const val KEY_PIN_FAILED_ATTEMPTS = "pin_failed_attempts"
         private const val KEY_PIN_LOCKOUT_STARTED_AT = "pin_lockout_started_at"
         private const val KEY_PIN_LOCKOUT_UNTIL = "pin_lockout_until"

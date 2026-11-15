@@ -64,7 +64,7 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
     interface PinProtectedHost {
         fun onPinLockRequired()
         fun onPinUnlocked()
-        fun onPinAutoWipeRequested()
+        fun onPinAutoWipeRequested(showWipedToast: Boolean = true)
     }
 
     private data class SecondaryLockState(
@@ -74,6 +74,8 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
         val prevImportanceForA11y: Int,
         val backCallback: OnBackPressedCallback?
     )
+
+    const val TAG_HARD_LOCK_OVERLAY = "hard_lock_overlay"
 
     private val registeredApps = Collections.synchronizedSet(
         Collections.newSetFromMap(WeakHashMap<Application, Boolean>())
@@ -130,7 +132,7 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
     }
 
     fun isLocked(prefs: SnakePreferences): Boolean =
-        prefs.pinLockEnabled && !unlockedForSession
+        prefs.pinHardLocked || (prefs.pinLockEnabled && !unlockedForSession)
 
     fun isActivityStarted(activity: Activity): Boolean =
         System.identityHashCode(activity) in startedActivityIds
@@ -488,6 +490,12 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
             )
         }
 
+        if (prefs.pinHardLocked) {
+            renderHardLockContent(activity, content, tokens, density, animate = false)
+            rootScroll.addView(content)
+            return rootScroll
+        }
+
         val titleTv = TextView(activity).apply {
             text = activity.getString(R.string.pin_title)
             textSize = 16.5f
@@ -579,7 +587,7 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
                     .setPositiveButton(R.string.pin_wipe_reset_btn) { _, _ ->
                         // Wipe all sensitive browser data BEFORE clearing PIN and unlocking.
                         if (activity is PinProtectedHost) {
-                            activity.onPinAutoWipeRequested()
+                            activity.onPinAutoWipeRequested(showWipedToast = false)
                             PinManager.clearPin(prefs)
                             markUnlocked()
                             activity.onPinUnlocked()
@@ -643,6 +651,21 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
                 syncIndicator()
                 val candidate = enteredPin.toString()
                 PinManager.verifyPinAsync(activity, prefs, candidate) { res ->
+                    if (res is PinManager.VerifyResult.TriggerHardLock) {
+                        verifying = false
+                        enteredPin.clear()
+                        if (!activity.isFinishing && !activity.isDestroyed) {
+                            hideKeyboard(activity, rootScroll)
+                            renderHardLockContent(activity, content, tokens, density, animate = true)
+                        } else {
+                            latestStartedActivity?.get()?.let { live ->
+                                if (!live.isFinishing && !live.isDestroyed && isActivityStarted(live)) {
+                                    enforceLockIfNeeded(live)
+                                }
+                            }
+                        }
+                        return@verifyPinAsync
+                    }
                     if (res is PinManager.VerifyResult.TriggerAutoWipe) {
                         verifying = false
                         enteredPin.clear()
@@ -687,12 +710,15 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
                                 res.keyPermanentlyLost -> activity.getString(R.string.pin_keystore_lost)
                                 res.keystoreError -> activity.getString(R.string.pin_keystore_unavailable)
                                 res.lockoutRemainingMs > 0L -> activity.getString(R.string.pin_locked_out, ((res.lockoutRemainingMs + 999L) / 1000L).toInt())
+                                prefs.pinAutoWipeOnFail && prefs.pinFailureAction == PinFailureAction.LOCK_FOREVER ->
+                                    activity.getString(R.string.pin_wrong_before_lock, res.remaining)
                                 prefs.pinAutoWipeOnFail -> activity.getString(R.string.pin_wrong, res.remaining)
                                 else -> activity.getString(R.string.pin_wrong_simple)
                             }
                             wipeResetBtn.visibility = if (res.keyPermanentlyLost) View.VISIBLE else View.GONE
                         }
                         is PinManager.VerifyResult.TriggerAutoWipe -> Unit
+                        is PinManager.VerifyResult.TriggerHardLock -> Unit
                     }
                 }
             }
@@ -895,8 +921,141 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
         imm?.hideSoftInputFromWindow(token, 0)
     }
 
+    private fun renderHardLockContent(
+        activity: Activity,
+        content: LinearLayout,
+        tokens: SnakeTheme.MaterialYouTokens,
+        density: Float,
+        animate: Boolean
+    ) {
+        content.removeAllViews()
+        (content.parent as? View)?.tag = TAG_HARD_LOCK_OVERLAY
+        val padH = (28 * density).toInt()
+        val padV = (36 * density).toInt()
+        content.setPadding(padH, padV, padH, padV)
+
+        val dangerColor = Color.parseColor("#EF4444")
+        val badgeBg = ColorUtils.setAlphaComponent(dangerColor, if (tokens.isLight) 26 else 38)
+        val badgeSize = (72 * density).toInt()
+        val badgeFrame = FrameLayout(activity).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(badgeBg)
+                cornerRadius = 24f * density
+            }
+            layoutParams = LinearLayout.LayoutParams(badgeSize, badgeSize)
+        }
+        val lockIcon = ImageView(activity).apply {
+            setImageResource(R.drawable.ic_settings_lock)
+            setColorFilter(dangerColor, PorterDuff.Mode.SRC_IN)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            val iconSz = (32 * density).toInt()
+            layoutParams = FrameLayout.LayoutParams(iconSz, iconSz, Gravity.CENTER)
+        }
+        badgeFrame.addView(lockIcon)
+
+        val titleTv = TextView(activity).apply {
+            text = activity.getString(R.string.pin_hard_lock_title)
+            textSize = 22f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(tokens.textPrimary)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = (24 * density).toInt()
+            }
+        }
+
+        val bodyTv = TextView(activity).apply {
+            text = activity.getString(R.string.pin_hard_lock_body)
+            textSize = 14.5f
+            setTextColor(tokens.textSecondary)
+            setLineSpacing(3f * density, 1f)
+            gravity = Gravity.CENTER
+            maxWidth = (320 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = (12 * density).toInt()
+            }
+        }
+
+        val settingsBtn = MaterialButton(activity).apply {
+            text = activity.getString(R.string.pin_hard_lock_open_settings)
+            textSize = 16f
+            letterSpacing = 0.01f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            isAllCaps = false
+            cornerRadius = (28 * density).toInt()
+            elevation = 0f
+            stateListAnimator = null
+            setBackgroundColor(tokens.primaryAccent)
+            setTextColor(tokens.onPrimaryAccent)
+            minWidth = (220 * density).toInt()
+            minimumWidth = (220 * density).toInt()
+            minHeight = (56 * density).toInt()
+            minimumHeight = (56 * density).toInt()
+            val hPad = (28 * density).toInt()
+            setPadding(hPad, 0, hPad, 0)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                (56 * density).toInt()
+            ).apply {
+                topMargin = (28 * density).toInt()
+            }
+            SnakeTheme.attachExpressivePressAnimation(this, scaleDown = 0.96f)
+            setOnClickListener {
+                runCatching {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", activity.packageName, null)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    activity.startActivity(intent)
+                }
+            }
+        }
+
+        content.addView(badgeFrame)
+        content.addView(titleTv)
+        content.addView(bodyTv)
+        content.addView(settingsBtn)
+
+        if (animate) {
+            content.alpha = 0f
+            content.scaleX = 0.96f
+            content.scaleY = 0.96f
+            content.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(200L)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        }
+    }
+
     fun enforceLockIfNeeded(activity: Activity) {
         val prefs = SnakePreferences(activity)
+        if (prefs.pinHardLocked) {
+            unlockedForSession = false
+            dismissActiveDialogs(activity)
+            if (activity is PinProtectedHost) {
+                activity.onPinLockRequired()
+                return
+            }
+            val existing = secondaryLocks[System.identityHashCode(activity)]
+            if (existing?.overlay?.tag == TAG_HARD_LOCK_OVERLAY) {
+                return
+            }
+            removeLockFromActivity(activity)
+            attachSecondaryLock(activity, prefs)
+            return
+        }
         val hasPendingAutoWipe = prefs.pinLockEnabled && prefs.pinAutoWipeOnFail && prefs.pinAutoWipePending
         if (hasPendingAutoWipe || pendingTaskResetAfterWipe) {
             pendingTaskResetAfterWipe = false

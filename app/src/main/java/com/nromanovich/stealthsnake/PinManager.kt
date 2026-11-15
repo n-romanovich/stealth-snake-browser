@@ -418,6 +418,7 @@ object PinManager {
         ) : VerifyResult()
 
         data object TriggerAutoWipe : VerifyResult()
+        data object TriggerHardLock : VerifyResult()
     }
 
     /** Exponential back-off: 30s after the 5th failure, doubling per further failure, capped at 15 min. */
@@ -494,6 +495,9 @@ object PinManager {
 
     @Synchronized
     fun verifyPin(prefs: SnakePreferences, candidate: String): VerifyResult {
+        if (prefs.pinHardLocked) {
+            return VerifyResult.TriggerHardLock
+        }
         if (!prefs.pinLockEnabled) {
             return VerifyResult.Success
         }
@@ -578,8 +582,13 @@ object PinManager {
 
         val nextAttempts = prefs.pinFailedAttempts + 1
         if (prefs.pinAutoWipeOnFail && nextAttempts >= MAX_FAILED_ATTEMPTS) {
-            prefs.commitAutoWipePending()
-            return VerifyResult.TriggerAutoWipe
+            return if (prefs.pinFailureAction == PinFailureAction.LOCK_FOREVER) {
+                prefs.commitHardLocked()
+                VerifyResult.TriggerHardLock
+            } else {
+                prefs.commitAutoWipePending()
+                VerifyResult.TriggerAutoWipe
+            }
         }
         prefs.pinFailedAttempts = nextAttempts
         val remaining = (MAX_FAILED_ATTEMPTS - nextAttempts).coerceAtLeast(0)

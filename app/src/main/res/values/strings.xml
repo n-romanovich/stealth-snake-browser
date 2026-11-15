@@ -395,6 +395,7 @@
     <string name="pin_hint">4–8 digit PIN</string>
     <string name="pin_unlock">Unlock</string>
     <string name="pin_wrong">Incorrect PIN (%1$d attempts left before session wipe)</string>
+    <string name="pin_wrong_before_lock">Incorrect PIN (%1$d attempts left before lock)</string>
     <string name="pin_wrong_simple">Incorrect PIN</string>
     <string name="pin_keystore_unavailable">Hardware security module unavailable. Try again.</string>
     <string name="pin_keystore_lost">Hardware security key was lost. Wipe browser data to reset PIN lock.</string>
@@ -419,6 +420,18 @@
     <string name="pin_verify_current_body">Enter your current PIN before setting a new one.</string>
     <string name="pin_verify_remove_title">Verify PIN to remove lock</string>
     <string name="pin_verify_disable_autowipe_title">Verify PIN to disable Auto-Wipe</string>
+    <string name="pin_failure_policy_title">After 5 wrong attempts</string>
+    <string name="pin_failure_policy_body">Choose how Stealth Snake should protect you if someone enters the wrong PIN five times.</string>
+    <string name="pin_failure_wipe_title">Erase browsing session</string>
+    <string name="pin_failure_wipe_desc">Deletes tabs, history, cache, downloads, and private captures, then resets the browser.</string>
+    <string name="pin_failure_lock_title">Lock browser permanently</string>
+    <string name="pin_failure_lock_desc">Completely blocks access to the app until you clear its data in Android Settings or reinstall.</string>
+    <string name="pin_failure_confirm">Confirm</string>
+    <string name="pin_hard_lock_title">Browser locked</string>
+    <string name="pin_hard_lock_body">Access has been permanently disabled after 5 incorrect PIN attempts.\n\nTo use Stealth Snake again, clear app data in Android Settings or reinstall the app.</string>
+    <string name="pin_hard_lock_open_settings">App settings</string>
+    <string name="pref_pin_failure_action">5 wrong attempts action</string>
+    <string name="pin_verify_change_failure_action_title">Verify PIN to change protection action</string>
     <string name="pref_auto_clear_offline">Clear offline &amp; downloads on Wipe</string>
     <string name="desc_auto_clear_offline">Clears saved offline archives and the in-app download list whenever the session is wiped.</string>
     <string name="reset_confirm_title">Reset settings to defaults?</string>

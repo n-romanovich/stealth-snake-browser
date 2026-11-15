@@ -397,6 +397,7 @@
     <string name="pin_hint">PIN от 4 до 8 цифр</string>
     <string name="pin_unlock">Разблокировать</string>
     <string name="pin_wrong">Неверный PIN (осталось попыток до очистки: %1$d)</string>
+    <string name="pin_wrong_before_lock">Неверный PIN (осталось попыток до блокировки: %1$d)</string>
     <string name="pin_wrong_simple">Неверный PIN-код</string>
     <string name="pin_keystore_unavailable">Модуль безопасности устройства недоступен. Повторите попытку.</string>
     <string name="pin_keystore_lost">Аппаратный ключ безопасности утрачен. Сотрите данные браузера, чтобы сбросить PIN.</string>
@@ -421,6 +422,18 @@
     <string name="pin_verify_current_body">Введите текущий PIN-код, чтобы продолжить.</string>
     <string name="pin_verify_remove_title">Подтвердите удаление PIN</string>
     <string name="pin_verify_disable_autowipe_title">Подтвердите отключение авто-Wipe</string>
+    <string name="pin_failure_policy_title">После 5 неверных попыток</string>
+    <string name="pin_failure_policy_body">Выберите, как браузер должен защитить ваши данные при пяти неверных попытках входа.</string>
+    <string name="pin_failure_wipe_title">Очистить сессию</string>
+    <string name="pin_failure_wipe_desc">Удаляет вкладки, историю, кэш, загрузки и скрытые снимки, возвращая браузер в чистое состояние.</string>
+    <string name="pin_failure_lock_title">Заблокировать браузер навсегда</string>
+    <string name="pin_failure_lock_desc">Полностью закрывает доступ к приложению до очистки его данных в настройках Android или переустановки.</string>
+    <string name="pin_failure_confirm">Подтвердить</string>
+    <string name="pin_hard_lock_title">Браузер заблокирован</string>
+    <string name="pin_hard_lock_body">Доступ полностью заблокирован после 5 неверных попыток ввода PIN-кода.\n\nЧтобы начать пользоваться браузером заново, очистите данные приложения в настройках Android или переустановите его.</string>
+    <string name="pin_hard_lock_open_settings">Настройки приложения</string>
+    <string name="pref_pin_failure_action">После 5 неверных попыток</string>
+    <string name="pin_verify_change_failure_action_title">Подтвердите PIN для смены действия</string>
     <string name="pref_auto_clear_offline">Очищать офлайн и загрузки при Wipe</string>
     <string name="desc_auto_clear_offline">Очищает сохранённые офлайн-страницы и список загрузок при каждой очистке сессии.</string>
     <string name="reset_confirm_title">Сбросить настройки по умолчанию?</string>

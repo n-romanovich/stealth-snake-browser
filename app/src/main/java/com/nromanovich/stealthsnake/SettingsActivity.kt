@@ -570,6 +570,26 @@ class SettingsActivity : AppCompatActivity() {
         super.onPause()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (prefs.pinPolicySelectionPending &&
+            prefs.pinLockEnabled &&
+            !PinLockCoordinator.isLocked(prefs) &&
+            activeDialogs.none { it.isShowing }
+        ) {
+            trackDialog(
+                PinDialogHelper.showPinFailureActionDialog(
+                    activity = this,
+                    prefs = prefs,
+                    isInitialSetup = true
+                ) {
+                    Toast.makeText(this, R.string.pin_saved, Toast.LENGTH_SHORT).show()
+                    buildSettingsUi(preserveScroll = true)
+                }
+            )
+        }
+    }
+
     private fun trackDialog(dialog: AlertDialog): AlertDialog {
         activeDialogs.removeAll { !it.isShowing }
         activeDialogs.add(dialog)
@@ -1406,6 +1426,41 @@ class SettingsActivity : AppCompatActivity() {
 
                 val autoWipeCard = addPinAutoWipeSwitchCard(pinGroup, colors, density)
                 registerSearchEntry(getString(R.string.pref_pin_auto_wipe), cat4Title, null, CAT_PIN, autoWipeCard)
+
+                val actionSummary = getString(
+                    if (prefs.pinFailureAction == PinFailureAction.LOCK_FOREVER) {
+                        R.string.pin_failure_lock_title
+                    } else {
+                        R.string.pin_failure_wipe_title
+                    }
+                )
+                val failureActionCard = addActionCard(
+                    pinGroup,
+                    colors,
+                    density,
+                    getString(R.string.pref_pin_failure_action),
+                    subtitle = actionSummary
+                ) {
+                    showVerifyCurrentPinDialog(
+                        titleRes = R.string.pin_verify_change_failure_action_title,
+                        palette = palette,
+                        density = density
+                    ) {
+                        trackDialog(
+                            PinDialogHelper.showPinFailureActionDialog(
+                                activity = this,
+                                prefs = prefs,
+                                isInitialSetup = false
+                            ) {
+                                buildSettingsUi(preserveScroll = true)
+                            }
+                        )
+                    }
+                }
+                failureActionCard.visibility = if (prefs.pinAutoWipeOnFail) View.VISIBLE else View.GONE
+                if (prefs.pinAutoWipeOnFail) {
+                    registerSearchEntry(getString(R.string.pref_pin_failure_action), cat4Title, null, CAT_PIN, failureActionCard)
+                }
             }
             refreshGroupShapes(pinGroup, colors, density)
         }

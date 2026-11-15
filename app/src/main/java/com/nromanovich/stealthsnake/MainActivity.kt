@@ -3174,17 +3174,19 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
         unlockPinOverlay()
     }
 
-    override fun onPinAutoWipeRequested() {
-        handlePinAutoWipe()
+    override fun onPinAutoWipeRequested(showWipedToast: Boolean) {
+        handlePinAutoWipe(showWipedToast)
     }
 
-    private fun handlePinAutoWipe() {
+    private fun handlePinAutoWipe(showWipedToast: Boolean = true) {
         pendingInitialLoad = false
         wipeSession(reloadBlank = true, reseed = true, forceClearPrivateArtifacts = true)
         prefs.scrubSensitiveDataForPanicWipe()
         approvedHttpHosts.clear()
         lastLoadedHomeUrl = DEFAULT_START_URL
-        Toast.makeText(this, R.string.pin_wiped, Toast.LENGTH_LONG).show()
+        if (showWipedToast) {
+            Toast.makeText(this, R.string.pin_wiped, Toast.LENGTH_LONG).show()
+        }
         if (!PinLockCoordinator.isLocked(prefs)) {
             unlockPinOverlay()
         } else {
@@ -3193,7 +3195,13 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     }
 
     private fun showPinLockOverlay() {
-        if (isPinLocked || !prefs.pinLockEnabled) return
+        if (isPinLocked && prefs.pinHardLocked && pinOverlay != null) {
+            if (pinOverlay?.tag == PinLockCoordinator.TAG_HARD_LOCK_OVERLAY) return
+            findViewById<FrameLayout>(R.id.rootFrame).removeView(pinOverlay)
+            pinOverlay = null
+            isPinLocked = false
+        }
+        if (isPinLocked || (!prefs.pinLockEnabled && !prefs.pinHardLocked)) return
         isPinLocked = true
         cancelPendingFileUpload()
         updateWebViewImeTranslation()
@@ -3237,6 +3245,7 @@ class MainActivity : AppCompatActivity(), PinLockCoordinator.PinProtectedHost {
     }
 
     private fun unlockPinOverlay() {
+        if (prefs.pinHardLocked) return
         val wasLocked = isPinLocked
         isPinLocked = false
         val rootContainer = findViewById<View>(R.id.rootContainer)

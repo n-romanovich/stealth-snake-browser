@@ -119,12 +119,23 @@ object PinDialogHelper {
                             }
                             result.onSuccess { derived ->
                                 PinManager.commitDerivedPin(prefs, derived)
+                                prefs.pinPolicySelectionPending = true
                                 // Atomically mark live foreground session unlocked immediately after commit.
                                 PinLockCoordinator.markUnlocked()
-                                Toast.makeText(activity, R.string.pin_saved, Toast.LENGTH_SHORT).show()
                                 cancelled = true
                                 dialog.dismiss()
                                 onPinSaved()
+                                if (!activity.isFinishing && !activity.isDestroyed) {
+                                    showPinFailureActionDialog(
+                                        activity = activity,
+                                        prefs = prefs,
+                                        isInitialSetup = true,
+                                        onDone = {
+                                            Toast.makeText(activity, R.string.pin_saved, Toast.LENGTH_SHORT).show()
+                                            onPinSaved()
+                                        }
+                                    )
+                                }
                             }.onFailure {
                                 okBtn.isEnabled = true
                                 cancelBtn?.isEnabled = true
@@ -197,6 +208,14 @@ object PinDialogHelper {
                 PinLockCoordinator.ensureRegistered(activity)
                 val candidate = input.text?.toString().orEmpty().trim()
                 PinManager.verifyPinAsync(activity, prefs, candidate) { res ->
+                    if (res is PinManager.VerifyResult.TriggerHardLock) {
+                        cancelled = true
+                        runCatching { dialog.dismiss() }
+                        if (!activity.isFinishing && !activity.isDestroyed && PinLockCoordinator.isActivityStarted(activity)) {
+                            PinLockCoordinator.enforceLockIfNeeded(activity)
+                        }
+                        return@verifyPinAsync
+                    }
                     if (res is PinManager.VerifyResult.TriggerAutoWipe) {
                         cancelled = true
                         runCatching { dialog.dismiss() }
@@ -241,6 +260,8 @@ object PinDialogHelper {
                                 res.keyPermanentlyLost -> activity.getString(R.string.pin_keystore_lost)
                                 res.keystoreError -> activity.getString(R.string.pin_keystore_unavailable)
                                 res.lockoutRemainingMs > 0L -> activity.getString(R.string.pin_locked_out, ((res.lockoutRemainingMs + 999L) / 1000L).toInt())
+                                prefs.pinAutoWipeOnFail && prefs.pinFailureAction == PinFailureAction.LOCK_FOREVER ->
+                                    activity.getString(R.string.pin_wrong_before_lock, res.remaining)
                                 prefs.pinAutoWipeOnFail -> activity.getString(R.string.pin_wrong, res.remaining)
                                 else -> activity.getString(R.string.pin_wrong_simple)
                             }
@@ -248,12 +269,161 @@ object PinDialogHelper {
                             shakeView(input, density)
                         }
                         is PinManager.VerifyResult.TriggerAutoWipe -> Unit
+                        is PinManager.VerifyResult.TriggerHardLock -> Unit
                     }
                 }
             }
         }
         dialog.show()
         return dialog
+    }
+
+    /**
+     * Material 3 Expressive single-choice dialog letting the user pick what happens
+     * after 5 consecutive incorrect PIN attempts: wiping the session or locking permanently.
+     */
+    fun showPinFailureActionDialog(
+        activity: Activity,
+        prefs: SnakePreferences,
+        isInitialSetup: Boolean = false,
+        onDone: () -> Unit
+    ): AlertDialog {
+        val palette = prefs.themePalette
+        val tokens = SnakeTheme.resolveTokens(palette, activity)
+        val dialogColors = SnakeTheme.resolveDialogColors(palette, activity)
+        val density = activity.resources.displayMetrics.density
+        val rippleColor = ColorUtils.setAlphaComponent(if (tokens.isLight) Color.BLACK else Color.WHITE, 28)
+
+        val container = createDialogRoot(activity, density)
+        container.addView(createTitle(activity, activity.getString(R.string.pin_failure_policy_title), dialogColors))
+
+        var selectedAction = prefs.pinFailureAction
+
+        val optionData = listOf(
+            Triple(PinFailureAction.WIPE_SESSION, R.string.pin_failure_wipe_title, R.string.pin_failure_wipe_desc),
+            Triple(PinFailureAction.LOCK_FOREVER, R.string.pin_failure_lock_title, R.string.pin_failure_lock_desc)
+        )
+
+        val cardViews = mutableMapOf<PinFailureAction, Triple<LinearLayout, View, View>>()
+
+        fun renderSelection() {
+            for ((action, views) in cardViews) {
+                val (row, radioOuter, radioInner) = views
+                val active = action == selectedAction
+                row.isSelected = active
+                ViewCompat.setStateDescription(row, if (active) "Selected" else "Not selected")
+                radioOuter.background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.TRANSPARENT)
+                    setStroke((2f * density).toInt().coerceAtLeast(1), if (active) tokens.primaryAccent else dialogColors.body)
+                }
+                radioInner.visibility = if (active) View.VISIBLE else View.INVISIBLE
+                radioInner.background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(tokens.primaryAccent)
+                }
+            }
+        }
+
+        optionData.forEachIndexed { idx, (action, titleRes, descRes) ->
+            val row = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.TOP
+                val pH = (4 * density).toInt()
+                val pV = (10 * density).toInt()
+                setPadding(pH, pV, pH, pV)
+                val mask = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setColor(Color.WHITE)
+                    cornerRadius = 14f * density
+                }
+                background = android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(rippleColor),
+                    null,
+                    mask
+                )
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    topMargin = if (idx == 0) (14 * density).toInt() else (6 * density).toInt()
+                }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    selectedAction = action
+                    renderSelection()
+                }
+            }
+
+            val radioFrame = android.widget.FrameLayout(activity).apply {
+                val sz = (20 * density).toInt()
+                layoutParams = LinearLayout.LayoutParams(sz, sz).apply {
+                    topMargin = (2 * density).toInt()
+                    marginEnd = (16 * density).toInt()
+                }
+            }
+            val radioOuter = View(activity).apply {
+                layoutParams = android.widget.FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+            val radioInner = View(activity).apply {
+                val innerSz = (10 * density).toInt()
+                layoutParams = android.widget.FrameLayout.LayoutParams(innerSz, innerSz, Gravity.CENTER)
+            }
+            radioFrame.addView(radioOuter)
+            radioFrame.addView(radioInner)
+
+            val textCol = LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            textCol.addView(TextView(activity).apply {
+                text = activity.getString(titleRes)
+                textSize = 16f
+                typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                setTextColor(dialogColors.title)
+            })
+            textCol.addView(TextView(activity).apply {
+                text = activity.getString(descRes)
+                textSize = 13.5f
+                setTextColor(dialogColors.body)
+                setLineSpacing(2f * density, 1f)
+                setPadding(0, (2 * density).toInt(), 0, 0)
+            })
+
+            row.addView(radioFrame)
+            row.addView(textCol)
+            container.addView(row)
+            cardViews[action] = Triple(row, radioOuter, radioInner)
+        }
+        renderSelection()
+
+        val scrollWrapper = ScrollView(activity).apply {
+            isVerticalScrollBarEnabled = false
+            addView(container)
+        }
+        val builder = AlertDialog.Builder(activity)
+            .setView(scrollWrapper)
+            .setCancelable(!isInitialSetup)
+            .setPositiveButton(R.string.pin_failure_confirm) { _, _ ->
+                prefs.commitPinFailurePolicy(selectedAction, autoWipeOnFail = true)
+                onDone()
+            }
+        if (!isInitialSetup) {
+            builder.setNegativeButton(R.string.action_cancel, null)
+        }
+        val policyDialog = builder.create().apply {
+            setCanceledOnTouchOutside(!isInitialSetup)
+        }
+        PinLockCoordinator.registerActiveDialog(activity, policyDialog)
+        policyDialog.setOnShowListener {
+            SnakeTheme.styleExpressiveDialog(policyDialog, palette)
+        }
+        policyDialog.show()
+        return policyDialog
     }
 
     private fun createDialogRoot(activity: Activity, density: Float): LinearLayout =
