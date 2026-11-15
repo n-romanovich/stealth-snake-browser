@@ -553,6 +553,8 @@ object SnakeTheme {
             )
 
             dialog.window?.let { win ->
+                @Suppress("DEPRECATION")
+                win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
                 val shape = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     setColor(colors.dialogBg)

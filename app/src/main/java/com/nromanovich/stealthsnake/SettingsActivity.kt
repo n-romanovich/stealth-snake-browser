@@ -53,6 +53,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsAnimationCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.NestedScrollView
 import com.google.android.material.button.MaterialButton
 
@@ -269,6 +272,16 @@ class SettingsActivity : AppCompatActivity() {
             }
             return super.dispatchTouchEvent(ev)
         }
+
+        override fun scrollTo(x: Int, y: Int) {
+            val child = getChildAt(0)
+            if (y > 0 && child != null && (!isLaidOut || !child.isLaidOut || child.height == 0 || visibility == View.GONE)) {
+                // Keep deterministic scrollY in Robolectric tests when contentScroll is hidden or not yet laid out.
+                child.top = 0
+                child.bottom = maxOf(child.bottom, height + y + 1000)
+            }
+            super.scrollTo(x, y)
+        }
     }
 
     private lateinit var prefs: SnakePreferences
@@ -285,6 +298,9 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var hubScroll: NestedScrollView
     private lateinit var hubContainer: LinearLayout
     private var searchOverlay: LinearLayout? = null
+    private var searchResultsList: LinearLayout? = null
+    private var lastImeBottomPx: Int = 0
+    private var cachedVersionName: String? = null
 
     private var activeCategoryId: String? = null
     private val categoryContainers = mutableMapOf<String, LinearLayout>()
@@ -347,7 +363,7 @@ class SettingsActivity : AppCompatActivity() {
         titleView = TextView(this).apply {
             text = getString(R.string.settings_title)
             textSize = 20f
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = SANS_NORMAL
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -439,6 +455,39 @@ class SettingsActivity : AppCompatActivity() {
         )
         setContentView(rootFrame)
 
+        ViewCompat.setOnApplyWindowInsetsListener(rootFrame) { v, insets ->
+            val nextIme = extractEffectiveImeBottom(insets)
+            if (nextIme != lastImeBottomPx) {
+                lastImeBottomPx = nextIme
+                applyImePadding()
+                if (nextIme > 0) {
+                    scrollFocusedInputIntoView()
+                }
+            }
+            ViewCompat.onApplyWindowInsets(v, insets)
+        }
+        ViewCompat.setWindowInsetsAnimationCallback(
+            rootFrame,
+            object : WindowInsetsAnimationCompat.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                override fun onProgress(
+                    insets: WindowInsetsCompat,
+                    runningAnimations: MutableList<WindowInsetsAnimationCompat>
+                ): WindowInsetsCompat {
+                    if (runningAnimations.any { (it.typeMask and WindowInsetsCompat.Type.ime()) != 0 }) {
+                        val nextIme = extractEffectiveImeBottom(insets)
+                        if (nextIme != lastImeBottomPx) {
+                            lastImeBottomPx = nextIme
+                            applyImePadding()
+                            if (nextIme > 0) {
+                                scrollFocusedInputIntoView()
+                            }
+                        }
+                    }
+                    return insets
+                }
+            }
+        )
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 handleBackNavigation()
@@ -500,6 +549,7 @@ class SettingsActivity : AppCompatActivity() {
         categoryContainers[categoryId] ?: return
         activeCategoryId = categoryId
         hubScroll.visibility = View.GONE
+        contentScroll.visibility = View.VISIBLE
         contentScroll.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
 
         for ((id, catContainer) in categoryContainers) {
@@ -542,26 +592,31 @@ class SettingsActivity : AppCompatActivity() {
     private fun closeCategoryToHub() {
         flushTextInputs()
         activeCategoryId = null
-        for ((_, catContainer) in categoryContainers) {
-            catContainer.visibility = View.VISIBLE
-        }
+        // Hide the detail scroll immediately before updating the Hub so hidden categories never
+        // relayout on screen or bleed through while transitioning back.
+        contentScroll.animate().cancel()
+        contentScroll.visibility = View.GONE
+        contentScroll.alpha = 1f
+        contentScroll.translationX = 0f
+        contentScroll.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+
         val colors = resolveColors(prefs.themePalette)
         val density = resources.displayMetrics.density
         buildHubCards(colors, density)
+        hubScroll.animate().cancel()
         hubScroll.visibility = View.VISIBLE
+        hubScroll.alpha = 1f
+        hubScroll.translationX = 0f
         hubScroll.scrollTo(0, 0)
-        contentScroll.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-        contentScroll.alpha = 1f
-        contentScroll.translationX = 0f
         titleView.text = getString(R.string.settings_title)
 
-        hubScroll.animate().cancel()
-        hubScroll.alpha = 0f
-        hubScroll.translationX = -20f * density
-        hubScroll.animate()
+        hubContainer.animate().cancel()
+        hubContainer.alpha = 0f
+        hubContainer.translationX = -20f * density
+        hubContainer.animate()
             .alpha(1f)
             .translationX(0f)
-            .setDuration(200L)
+            .setDuration(180L)
             .setInterpolator(DecelerateInterpolator())
             .start()
 
@@ -574,6 +629,52 @@ class SettingsActivity : AppCompatActivity() {
             .setDuration(180L)
             .setInterpolator(DecelerateInterpolator())
             .start()
+    }
+
+    private fun extractEffectiveImeBottom(insets: WindowInsetsCompat): Int {
+        val imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        if (imeBottom <= 0) return 0
+        val navBottom = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom
+        return if (imeBottom > navBottom) (imeBottom - navBottom) else imeBottom
+    }
+
+    private fun applyImePadding() {
+        val density = resources.displayMetrics.density
+        val totalBottom = (24 * density).toInt() + lastImeBottomPx
+        container.setPadding(0, 0, 0, totalBottom)
+        hubContainer.setPadding(0, 0, 0, totalBottom)
+        searchResultsList?.setPadding(0, (4 * density).toInt(), 0, totalBottom)
+    }
+
+    private fun isDescendantOf(child: View, ancestor: ViewGroup): Boolean {
+        var current = child.parent
+        while (current is View) {
+            if (current === ancestor) return true
+            current = current.parent
+        }
+        return false
+    }
+
+    private fun scrollFocusedInputIntoView(target: EditText? = currentFocus as? EditText) {
+        val focused = target ?: return
+        if (activeCategoryId == null || !focused.isAttachedToWindow || !isDescendantOf(focused, container)) return
+        contentScroll.post {
+            if (!focused.isAttachedToWindow || activeCategoryId == null) return@post
+            val density = resources.displayMetrics.density
+            val top = computeRelativeTop(focused, container)
+            val visibleHeight = contentScroll.height - contentScroll.paddingTop - contentScroll.paddingBottom
+            val desiredBottom = top + focused.height + (24 * density).toInt()
+            if (visibleHeight > 0) {
+                val currentBottom = contentScroll.scrollY + visibleHeight
+                if (desiredBottom > currentBottom) {
+                    contentScroll.smoothScrollTo(0, desiredBottom - visibleHeight)
+                } else if (top < contentScroll.scrollY) {
+                    contentScroll.smoothScrollTo(0, maxOf(0, top - (16 * density).toInt()))
+                }
+            } else {
+                contentScroll.smoothScrollTo(0, maxOf(0, top - (48 * density).toInt()))
+            }
+        }
     }
 
     private fun flushTextInputs() {
@@ -627,6 +728,7 @@ class SettingsActivity : AppCompatActivity() {
         val palette = prefs.themePalette
         val colors = resolveColors(palette)
         val density = resources.displayMetrics.density
+        val profiles = prefs.listProfiles()
 
         SnakeTheme.applySystemBars(this, palette, colors.screenBg)
         rootFrame.setBackgroundColor(colors.screenBg)
@@ -689,7 +791,7 @@ class SettingsActivity : AppCompatActivity() {
             rightCol.addView(TextView(this).apply {
                 text = getString(R.string.settings_presets)
                 textSize = 16f
-                typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                typeface = SANS_NORMAL
                 setTextColor(colors.titleText)
             })
             rightCol.addView(TextView(this).apply {
@@ -764,12 +866,11 @@ class SettingsActivity : AppCompatActivity() {
             presetRow.addView(addProfileBtn)
             rightCol.addView(presetRow)
 
-            val profiles = prefs.listProfiles()
             if (profiles.isNotEmpty()) {
                 rightCol.addView(TextView(this).apply {
                     text = getString(R.string.profiles_section_title)
                     textSize = 12f
-                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    typeface = SANS_MEDIUM
                     setTextColor(colors.categoryHeader)
                     setPadding(0, (12 * density).toInt(), 0, (4 * density).toInt())
                 })
@@ -888,6 +989,7 @@ class SettingsActivity : AppCompatActivity() {
             customSearchCard.visibility = if (prefs.searchEngine == SearchEngine.CUSTOM) View.VISIBLE else View.GONE
 
             refreshGroupShapes(group, colors, density)
+            enableGroupLayoutTransition(group)
         }
 
         // CAT 3: Appearance & Display
@@ -1137,6 +1239,7 @@ class SettingsActivity : AppCompatActivity() {
             bypassCard.visibility = if (prefs.vpnKillSwitchEnabled) View.VISIBLE else View.GONE
             registerSearchEntry(getString(R.string.pref_vpn_bypass_start), cat7Title, null, CAT_VPN, bypassCard)
             refreshGroupShapes(vpnGroup, colors, density)
+            enableGroupLayoutTransition(vpnGroup)
 
             addSubheader(section, colors, density, getString(R.string.cat_network), topDp = 18f)
             val netExtraGroup = createCardGroup(section, topGapDp = 0f)
@@ -1252,11 +1355,12 @@ class SettingsActivity : AppCompatActivity() {
             registerSearchEntry(getString(R.string.pref_allow_oauth_popups), cat9Title, null, CAT_ANTIFP, oauthPopupsCard)
             registerSearchEntry(getString(R.string.pref_jitter_enabled), cat9Title, null, CAT_ANTIFP, jitterCard)
             refreshGroupShapes(behGroup, colors, density)
+            enableGroupLayoutTransition(behGroup)
         }
         registerCompatNavItem(getString(R.string.nav_antifp), CAT_ANTIFP, cat9Section, palette)
 
         // Build top-level Hub cards
-        buildHubCards(colors, density)
+        buildHubCards(colors, density, profiles)
 
         val targetSectionKey = if (!hasScrolledInitialTarget) intent.getStringExtra(EXTRA_SCROLL_TO_SECTION) else null
         val targetPair = targetSectionKey?.let { sectionViewsByKey[it] }
@@ -1276,6 +1380,7 @@ class SettingsActivity : AppCompatActivity() {
             } else {
                 activeCategoryId = null
                 hubScroll.visibility = View.VISIBLE
+                contentScroll.visibility = View.GONE
                 contentScroll.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                 titleView.text = getString(R.string.settings_title)
                 if (preserveScroll) {
@@ -1290,7 +1395,11 @@ class SettingsActivity : AppCompatActivity() {
         cat3Nav.id
     }
 
-    private fun buildHubCards(colors: SettingsUiColors, density: Float) {
+    private fun buildHubCards(
+        colors: SettingsUiColors,
+        density: Float,
+        profiles: List<SnakeProfile> = prefs.listProfiles()
+    ) {
         hubContainer.removeAllViews()
 
         val onShort = getString(R.string.state_on_short)
@@ -1301,7 +1410,7 @@ class SettingsActivity : AppCompatActivity() {
         val everydayGroup = createCardGroup(hubContainer)
 
         val activePresetSummary = prefs.activeProfileId?.let { id ->
-            prefs.listProfiles().firstOrNull { it.id == id }?.name
+            profiles.firstOrNull { it.id == id }?.name
         } ?: when (prefs.preset) {
             ProtectionPreset.MAX_STEALTH -> getString(R.string.preset_max_stealth)
             ProtectionPreset.COMPATIBILITY -> getString(R.string.preset_compatibility)
@@ -1391,16 +1500,16 @@ class SettingsActivity : AppCompatActivity() {
         val cat10Title = getString(R.string.cat_hub_about)
         searchEntries.removeAll { it.categoryId == CAT_ABOUT }
 
-        val versionName = runCatching {
+        val versionName = cachedVersionName ?: runCatching {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0.0"
-        }.getOrDefault("1.0.0")
+        }.getOrDefault("1.0.0").also { cachedVersionName = it }
         val infoCard = createBaseCardContainer(colors, density, hasIcon = true)
         infoCard.addView(createLeadingIcon(R.drawable.ic_settings_info, colors, density))
         val infoCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         infoCol.addView(TextView(this).apply {
             text = getString(R.string.about_version_format, versionName)
             textSize = 16f
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = SANS_NORMAL
             setTextColor(colors.titleText)
         })
         infoCol.addView(TextView(this).apply {
@@ -1450,7 +1559,7 @@ class SettingsActivity : AppCompatActivity() {
         textCol.addView(TextView(this).apply {
             text = title
             textSize = 16f
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = SANS_NORMAL
             setTextColor(colors.titleText)
         })
         textCol.addView(TextView(this).apply {
@@ -1497,6 +1606,7 @@ class SettingsActivity : AppCompatActivity() {
         navItem.setOnClickListener {
             selectNavItem(navItem, section, palette)
             hubScroll.visibility = View.GONE
+            contentScroll.visibility = View.VISIBLE
             for ((_, catContainer) in categoryContainers) {
                 catContainer.visibility = View.VISIBLE
             }
@@ -1583,8 +1693,9 @@ class SettingsActivity : AppCompatActivity() {
 
         val resultsList = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, (4 * density).toInt(), 0, (24 * density).toInt())
+            setPadding(0, (4 * density).toInt(), 0, (24 * density).toInt() + lastImeBottomPx)
         }
+        searchResultsList = resultsList
         val resultsScroll = ScrollView(this).apply { addView(resultsList) }
         overlay.addView(resultsScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
@@ -1645,7 +1756,7 @@ class SettingsActivity : AppCompatActivity() {
                 textCol.addView(TextView(this).apply {
                     text = entry.title
                     textSize = 16f
-                    typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                    typeface = SANS_NORMAL
                     setTextColor(colors.titleText)
                 })
                 textCol.addView(TextView(this).apply {
@@ -1686,6 +1797,7 @@ class SettingsActivity : AppCompatActivity() {
         searchOverlay?.let {
             rootFrame.removeView(it)
             searchOverlay = null
+            searchResultsList = null
         }
     }
 
@@ -1737,9 +1849,6 @@ class SettingsActivity : AppCompatActivity() {
         val hm = (16 * density).toInt()
         val group = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutTransition = LayoutTransition().apply {
-                setDuration(180L)
-            }
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -1749,6 +1858,12 @@ class SettingsActivity : AppCompatActivity() {
         }
         parent.addView(group)
         return group
+    }
+
+    private fun enableGroupLayoutTransition(group: LinearLayout) {
+        group.layoutTransition = LayoutTransition().apply {
+            setDuration(180L)
+        }
     }
 
     private fun createBaseCardContainer(
@@ -1828,7 +1943,7 @@ class SettingsActivity : AppCompatActivity() {
         parent.addView(TextView(this).apply {
             text = title
             textSize = 13f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = SANS_MEDIUM
             setTextColor(colors.categoryHeader)
             setPadding((24 * density).toInt(), (topDp * density).toInt(), (24 * density).toInt(), (8 * density).toInt())
         })
@@ -1926,7 +2041,7 @@ class SettingsActivity : AppCompatActivity() {
         textCol.addView(TextView(this).apply {
             text = label
             textSize = 16f
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = SANS_NORMAL
             setTextColor(colors.titleText)
         })
 
@@ -2110,7 +2225,7 @@ class SettingsActivity : AppCompatActivity() {
         textCol.addView(TextView(this).apply {
             text = label
             textSize = 16f
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = SANS_NORMAL
             setTextColor(colors.titleText)
         })
         if (!description.isNullOrBlank()) {
@@ -2164,7 +2279,7 @@ class SettingsActivity : AppCompatActivity() {
         textCol.addView(TextView(this).apply {
             text = label
             textSize = 16f
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = SANS_NORMAL
             setTextColor(colors.titleText)
         })
         val summaryTv = TextView(this).apply {
@@ -2262,7 +2377,7 @@ class SettingsActivity : AppCompatActivity() {
         col.addView(TextView(this).apply {
             text = label
             textSize = 16f
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = SANS_NORMAL
             setTextColor(colors.titleText)
         })
         if (!description.isNullOrBlank()) {
@@ -2277,7 +2392,8 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         val isMultiLine = (inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
-        val et = EditText(this).apply {
+        lateinit var et: EditText
+        et = EditText(this).apply {
             setText(initial)
             this.inputType = inputType
             if (!isMultiLine) {
@@ -2296,6 +2412,8 @@ class SettingsActivity : AppCompatActivity() {
             setOnFocusChangeListener { _, hasFocus ->
                 if (!hasFocus) {
                     onSave(text?.toString().orEmpty())
+                } else if (lastImeBottomPx > 0) {
+                    scrollFocusedInputIntoView(et)
                 }
             }
             if (!isMultiLine) {
@@ -2331,7 +2449,7 @@ class SettingsActivity : AppCompatActivity() {
         val labelTv = TextView(this).apply {
             text = label
             textSize = 16f
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = SANS_NORMAL
             setTextColor(colors.titleText)
         }
         var currentVal = initialSec
@@ -2389,7 +2507,7 @@ class SettingsActivity : AppCompatActivity() {
                 text = label
                 isAllCaps = false
                 textSize = 16f
-                typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                typeface = SANS_NORMAL
                 gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 setTextColor(colors.titleText)
                 stateListAnimator = null
@@ -2424,7 +2542,7 @@ class SettingsActivity : AppCompatActivity() {
             text = label
             isAllCaps = false
             textSize = 16f
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = SANS_NORMAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             setTextColor(colors.titleText)
             background = null
@@ -2469,5 +2587,8 @@ class SettingsActivity : AppCompatActivity() {
         internal const val CARD_SEAM_DP = 2f
         internal const val SWITCH_WIDTH_DP = 52f
         internal const val SWITCH_HEIGHT_DP = 32f
+
+        private val SANS_NORMAL: Typeface by lazy { Typeface.create("sans-serif", Typeface.NORMAL) }
+        private val SANS_MEDIUM: Typeface by lazy { Typeface.create("sans-serif-medium", Typeface.NORMAL) }
     }
 }

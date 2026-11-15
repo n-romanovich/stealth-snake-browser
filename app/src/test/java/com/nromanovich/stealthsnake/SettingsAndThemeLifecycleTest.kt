@@ -1,14 +1,22 @@
 package com.nromanovich.stealthsnake
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.ColorDrawable
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.RadioButton
 import android.widget.ScrollView
+import android.widget.TextView
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.NestedScrollView
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -153,6 +161,61 @@ class SettingsAndThemeLifecycleTest {
         assertEquals(ThemePalette.MIDNIGHT.bg, (vRoot.background as ColorDrawable).color)
         viewerCtrl.pause().destroy()
         offlineDir.deleteRecursively()
+    }
+
+    @Test
+    fun `SettingsActivity hides detail scroll on hub transitions back without window bleed-through and pads for IME`() {
+        val info = ctx.packageManager.getActivityInfo(ComponentName(ctx, SettingsActivity::class.java), 0)
+        @Suppress("DEPRECATION")
+        val expectedAdjust = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        assertEquals(expectedAdjust, info.softInputMode)
+
+        val ctrl = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        val activity = ctrl.get()
+        val root = (activity.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0)
+
+        val hubScroll = collectViews(root) { it is NestedScrollView }.first() as NestedScrollView
+        val contentScroll = collectViews(root) { it is ScrollView }.last() as ScrollView
+        val container = contentScroll.getChildAt(0) as ViewGroup
+
+        // Starting on the Settings Hub keeps the 9 hidden detail categories unmeasured (View.GONE).
+        assertEquals(View.VISIBLE, hubScroll.visibility)
+        assertEquals(View.GONE, contentScroll.visibility)
+        val initialBottomPad = container.paddingBottom
+
+        // Opening a category shows contentScroll and hides hubScroll.
+        val presetsCardTitle = collectViews(hubScroll) {
+            it is TextView && it.text?.toString() == ctx.getString(R.string.cat_hub_presets)
+        }.first()
+        (presetsCardTitle.parent.parent as View).performClick()
+        ShadowLooper.idleMainLooper()
+        assertEquals(View.GONE, hubScroll.visibility)
+        assertEquals(View.VISIBLE, contentScroll.visibility)
+
+        // Pressing Back immediately hides contentScroll and keeps hubScroll opaque (no bleed-through).
+        val backBtn = collectViews(root) {
+            it is ImageButton && it.contentDescription?.toString() == ctx.getString(R.string.action_cancel)
+        }.first()
+        backBtn.performClick()
+        assertEquals(View.GONE, contentScroll.visibility)
+        assertEquals(View.VISIBLE, hubScroll.visibility)
+        assertEquals(1f, hubScroll.alpha, 0.001f)
+        ShadowLooper.idleMainLooper()
+
+        // Dispatching IME insets adds keyboard height to scrollable container padding.
+        val imeInsets = WindowInsetsCompat.Builder()
+            .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, 480))
+            .build()
+        ViewCompat.dispatchApplyWindowInsets(root, imeInsets)
+        assertEquals(initialBottomPad + 480, container.paddingBottom)
+
+        val zeroInsets = WindowInsetsCompat.Builder()
+            .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, 0))
+            .build()
+        ViewCompat.dispatchApplyWindowInsets(root, zeroInsets)
+        assertEquals(initialBottomPad, container.paddingBottom)
+
+        ctrl.pause().destroy()
     }
 
     private fun collectViews(root: View, predicate: (View) -> Boolean): List<View> {

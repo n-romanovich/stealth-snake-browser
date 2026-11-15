@@ -5,8 +5,10 @@ import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebResourceRequest
@@ -413,6 +415,80 @@ class BrowserUiLifecycleTest {
         assertEquals(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, activity.requestedOrientation)
         assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, rootContainer.layoutParams.width)
         assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, rootContainer.layoutParams.height)
+
+        ctrl.pause().destroy()
+    }
+
+    @Test
+    fun `MainActivity shifts webViewContainer only when IME overlaps tapped input while keeping WebView size fixed`() {
+        val ctrl = Robolectric.buildActivity(MainActivity::class.java).setup()
+        ShadowLooper.idleMainLooper()
+        val activity = ctrl.get()
+        val webViewContainer = activity.findViewById<FrameLayout>(R.id.webViewContainer)
+        val webView = activity.findViewById<WebView>(R.id.webView)
+        val urlInput = activity.findViewById<EditText>(R.id.urlInput)
+
+        webViewContainer.measure(
+            View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY)
+        )
+        webViewContainer.layout(0, 0, 1080, 1000)
+        assertEquals(1080, webView.measuredWidth)
+        assertEquals(1000, webView.measuredHeight)
+        val initWidth = webView.measuredWidth
+        val initHeight = webView.measuredHeight
+
+        // Tapping near the top of WebView leaves overlap <= 0: no upward shift that pushes input off-screen.
+        activity.onImeInsetChangedForTest(imeBottomPx = 450, touchYInWebView = 120f)
+        assertEquals(0f, webViewContainer.translationY, 0.5f)
+        assertEquals(initWidth, webView.measuredWidth)
+        assertEquals(initHeight, webView.measuredHeight)
+
+        // Tapping near the bottom shifts cleanly past the old 45% cap without resizing the WebView.
+        val density = activity.resources.displayMetrics.density
+        val expectedMidBottomOverlap = minOf(920f + 56f * density, 1000f) - (1000f - 520f)
+        activity.onImeInsetChangedForTest(imeBottomPx = 520, touchYInWebView = 920f)
+        assertTrue(expectedMidBottomOverlap > 450f)
+        assertEquals(-expectedMidBottomOverlap, webViewContainer.translationY, 0.5f)
+        assertEquals(initWidth, webView.measuredWidth)
+        assertEquals(initHeight, webView.measuredHeight)
+
+        // Focusing toolbar urlInput resets any translation immediately.
+        urlInput.requestFocus()
+        activity.onImeInsetChangedForTest(imeBottomPx = 520, touchYInWebView = 920f)
+        assertEquals(0f, webViewContainer.translationY, 0.5f)
+        urlInput.clearFocus()
+
+        // Closing the IME resets translation back to 0.
+        activity.onImeInsetChangedForTest(imeBottomPx = 0, touchYInWebView = 920f)
+        assertEquals(0f, webViewContainer.translationY, 0.5f)
+
+        // Tapping at the very bottom via dispatchTouchEvent shifts full clamped IME height (-520px).
+        val loc = IntArray(2)
+        webViewContainer.getLocationInWindow(loc)
+        val tapX = 300f
+        val tapY = loc[1] + 960f
+        val down = MotionEvent.obtain(100L, 100L, MotionEvent.ACTION_DOWN, tapX, tapY, 0)
+        val up = MotionEvent.obtain(100L, 120L, MotionEvent.ACTION_UP, tapX, tapY, 0)
+        activity.dispatchTouchEvent(down)
+        activity.dispatchTouchEvent(up)
+        down.recycle()
+        up.recycle()
+        activity.onImeInsetChangedForTest(imeBottomPx = 520)
+        assertEquals(-520f, webViewContainer.translationY, 0.5f)
+
+        // Expressive dialogs keep SOFT_INPUT_ADJUST_RESIZE so dialog EditTexts move above the keyboard.
+        val dlg = AlertDialog.Builder(activity).setTitle("Test").create()
+        dlg.show()
+        SnakeTheme.styleExpressiveDialog(dlg, ThemePalette.OBSIDIAN)
+        @Suppress("DEPRECATION")
+        val expectedAdjust = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        assertEquals(
+            expectedAdjust,
+            dlg.window?.attributes?.softInputMode?.and(WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST)
+        )
+        dlg.dismiss()
+        ShadowLooper.idleMainLooper()
 
         ctrl.pause().destroy()
     }
