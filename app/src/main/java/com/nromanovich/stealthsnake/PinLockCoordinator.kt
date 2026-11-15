@@ -519,30 +519,36 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
         val keySize = minOf((82 * density).toInt(), maxOf((62 * density).toInt(), (screenWidthPx - (84 * density).toInt()) / 3))
 
         lateinit var clearKeyTv: AppCompatTextView
+        val pillCornerRest = (25 * density).toInt()
+        val pillCornerPressed = (14 * density).toInt()
         val unlockBtn = MaterialButton(activity).apply {
             text = activity.getString(R.string.pin_unlock)
-            textSize = 14f
+            textSize = 15f
+            letterSpacing = 0.01f
+            maxLines = 1
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             isAllCaps = false
-            cornerRadius = (22 * density).toInt()
+            cornerRadius = pillCornerRest
             elevation = 0f
             stateListAnimator = null
             setBackgroundColor(pillDisabledBg)
             setTextColor(pillDisabledText)
             isEnabled = false
-            minWidth = (140 * density).toInt()
-            minimumWidth = (140 * density).toInt()
-            minHeight = (44 * density).toInt()
-            minimumHeight = (44 * density).toInt()
-            val hPad = (28 * density).toInt()
+            minWidth = (180 * density).toInt()
+            minimumWidth = (180 * density).toInt()
+            minHeight = (50 * density).toInt()
+            minimumHeight = (50 * density).toInt()
+            val hPad = (32 * density).toInt()
             setPadding(hPad, 0, hPad, 0)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-                (44 * density).toInt()
+                (50 * density).toInt()
             ).apply {
-                topMargin = (28 * density).toInt()
+                topMargin = (24 * density).toInt()
             }
-            SnakeTheme.attachExpressivePressAnimation(this, scaleDown = 0.95f)
+            SnakeTheme.attachExpressivePressAnimation(this, scaleDown = 0.96f) { pressed ->
+                cornerRadius = if (pressed) pillCornerPressed else pillCornerRest
+            }
         }
 
         val wipeResetBtn = MaterialButton(activity).apply {
@@ -613,10 +619,22 @@ object PinLockCoordinator : Application.ActivityLifecycleCallbacks {
             clearKeyTv.animate().alpha(if (len > 0) 0.85f else 0f).setDuration(150L).start()
 
             val canSubmit = !verifying && len in PinManager.MIN_PIN_LENGTH..PinManager.MAX_PIN_LENGTH
+            val becameReady = canSubmit && !unlockBtn.isEnabled
             unlockBtn.isEnabled = canSubmit
+            unlockBtn.cornerRadius = pillCornerRest
             unlockBtn.setBackgroundColor(if (canSubmit) pillEnabledBg else pillDisabledBg)
             unlockBtn.setTextColor(if (canSubmit) pillEnabledText else pillDisabledText)
             unlockBtn.alpha = if (canSubmit) 1.0f else 0.72f
+            if (becameReady) {
+                unlockBtn.scaleX = 0.96f
+                unlockBtn.scaleY = 0.96f
+                unlockBtn.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(180L)
+                    .setInterpolator(OvershootInterpolator(1.3f))
+                    .start()
+            }
         }
 
         val submitPin = {

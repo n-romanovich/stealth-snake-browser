@@ -20,6 +20,7 @@ import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.ColorRes
 import androidx.annotation.RequiresApi
@@ -603,7 +604,8 @@ object SnakeTheme {
                     cornerRadius = 28f * density
                 }
                 val insetH = (16 * density).toInt()
-                win.setBackgroundDrawable(InsetDrawable(shape, insetH, 0, insetH, 0))
+                val insetV = (16 * density).toInt()
+                win.setBackgroundDrawable(InsetDrawable(shape, insetH, insetV, insetH, insetV))
                 win.decorView.apply {
                     scaleX = 0.96f
                     scaleY = 0.96f
@@ -618,6 +620,11 @@ object SnakeTheme {
                 }
             }
 
+            val padH = (24 * density).toInt()
+            dialog.findViewById<View>(androidx.appcompat.R.id.title_template)
+                ?.takeIf { it.visibility == View.VISIBLE }
+                ?.setPadding(padH, padH, padH, 0)
+
             dialog.findViewById<TextView>(androidx.appcompat.R.id.alertTitle)?.apply {
                 textSize = 22f
                 typeface = Typeface.create("sans-serif", Typeface.NORMAL)
@@ -628,33 +635,48 @@ object SnakeTheme {
                 typeface = Typeface.create("sans-serif", Typeface.NORMAL)
                 setTextColor(colors.body)
                 setLineSpacing(3f * density, 1f)
+                setPadding(padH, (4 * density).toInt(), padH, (4 * density).toInt())
             }
 
+            val posBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            val negBtn = dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
+            val neuBtn = dialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+            val isIconOnlyNeutral = neuBtn != null &&
+                neuBtn.text.isNullOrBlank() &&
+                neuBtn.compoundDrawablesRelative.any { it != null }
+
+            val visibleButtons = listOfNotNull(
+                posBtn?.takeIf { it.visibility == View.VISIBLE },
+                negBtn?.takeIf { it.visibility == View.VISIBLE },
+                neuBtn?.takeIf { it.visibility == View.VISIBLE && !isIconOnlyNeutral }
+            )
+            val pillHPadDp = if (visibleButtons.size >= 3) 16f else 20f
+
             styleDialogPillButton(
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE),
+                posBtn,
                 bgDrawable = pillRippleSurface(colors.positiveBg, rippleAlphaColor, 20f, density),
                 fgColor = colors.positiveText,
-                density = density
+                density = density,
+                hPadDp = pillHPadDp
             )
             styleDialogPillButton(
-                dialog.getButton(AlertDialog.BUTTON_NEGATIVE),
+                negBtn,
                 bgDrawable = outlinedPillRippleSurface(colors.stroke, rippleAlphaColor, 20f, density, colors.secondaryBg),
                 fgColor = colors.secondaryText,
-                density = density
+                density = density,
+                hPadDp = pillHPadDp
             )
-            val neutralBtn = dialog.getButton(AlertDialog.BUTTON_NEUTRAL)
-            if (neutralBtn != null) {
-                val isIconOnlyNeutral = neutralBtn.text.isNullOrBlank() &&
-                    neutralBtn.compoundDrawablesRelative.any { it != null }
-                if (!isIconOnlyNeutral) {
-                    styleDialogPillButton(
-                        neutralBtn,
-                        bgDrawable = outlinedPillRippleSurface(colors.stroke, rippleAlphaColor, 20f, density, colors.secondaryBg),
-                        fgColor = colors.secondaryText,
-                        density = density
-                    )
-                }
+            if (neuBtn != null && !isIconOnlyNeutral) {
+                styleDialogPillButton(
+                    neuBtn,
+                    bgDrawable = outlinedPillRippleSurface(colors.stroke, rippleAlphaColor, 20f, density, colors.secondaryBg),
+                    fgColor = colors.secondaryText,
+                    density = density,
+                    hPadDp = pillHPadDp
+                )
             }
+
+            configureDialogButtonBar(dialog, posBtn, negBtn, neuBtn, density)
         }
 
         if (dialog.isShowing) {
@@ -664,11 +686,74 @@ object SnakeTheme {
         }
     }
 
+    private fun configureDialogButtonBar(
+        dialog: AlertDialog,
+        posBtn: Button?,
+        negBtn: Button?,
+        neuBtn: Button?,
+        density: Float
+    ) {
+        val padH = (24 * density).toInt()
+        val padTop = (16 * density).toInt()
+        val padBottom = (20 * density).toInt()
+
+        val buttonPanel = dialog.findViewById<ViewGroup>(androidx.appcompat.R.id.buttonPanel)
+        if (buttonPanel != null && buttonPanel.visibility == View.VISIBLE) {
+            buttonPanel.clipToPadding = false
+            buttonPanel.minimumHeight = 0
+            buttonPanel.setPadding(padH, padTop, padH, padBottom)
+        }
+
+        val buttonBar = (posBtn?.parent ?: negBtn?.parent ?: neuBtn?.parent) as? LinearLayout ?: return
+        buttonBar.clipToPadding = false
+        buttonBar.setPadding(0, 0, 0, 0)
+        updateDialogButtonMargins(buttonBar, posBtn, negBtn, density)
+        buttonBar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (updateDialogButtonMargins(buttonBar, posBtn, negBtn, density)) {
+                buttonBar.post { buttonBar.requestLayout() }
+            }
+        }
+    }
+
+    private fun updateDialogButtonMargins(
+        buttonBar: LinearLayout,
+        posBtn: Button?,
+        negBtn: Button?,
+        density: Float
+    ): Boolean {
+        val gap = (8 * density).toInt()
+        val isStacked = buttonBar.orientation == LinearLayout.VERTICAL
+        var changed = false
+        var seenVisible = 0
+        for (i in 0 until buttonBar.childCount) {
+            val btn = buttonBar.getChildAt(i) as? Button ?: continue
+            if (btn.visibility != View.VISIBLE) continue
+            val lp = btn.layoutParams as? ViewGroup.MarginLayoutParams ?: continue
+            val targetStart = when {
+                isStacked -> 0
+                btn === posBtn && negBtn?.visibility == View.VISIBLE -> gap
+                else -> 0
+            }
+            val targetTop = if (isStacked && seenVisible > 0) gap else 0
+            if (lp.marginStart != targetStart || lp.marginEnd != 0 || lp.topMargin != targetTop || lp.bottomMargin != 0) {
+                lp.marginStart = targetStart
+                lp.marginEnd = 0
+                lp.topMargin = targetTop
+                lp.bottomMargin = 0
+                btn.layoutParams = lp
+                changed = true
+            }
+            seenVisible++
+        }
+        return changed
+    }
+
     private fun styleDialogPillButton(
         btn: Button?,
         bgDrawable: Drawable,
         fgColor: Int,
-        density: Float
+        density: Float,
+        hPadDp: Float = 20f
     ) {
         if (btn == null || btn.visibility != View.VISIBLE) return
         btn.apply {
@@ -680,12 +765,11 @@ object SnakeTheme {
             textSize = 14f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setTextColor(fgColor)
-            val hPad = (20 * density).toInt()
+            val hPad = (hPadDp * density).toInt()
             val vPad = (8 * density).toInt()
             setPadding(hPad, vPad, hPad, vPad)
             minHeight = (40 * density).toInt()
             minimumHeight = (40 * density).toInt()
-            (layoutParams as? ViewGroup.MarginLayoutParams)?.marginStart = (8 * density).toInt()
         }
     }
 

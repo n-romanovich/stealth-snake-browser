@@ -31,9 +31,9 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
 /**
- * Android 16 Material 3 Expressive Troubleshooting Guide matching [SettingsActivity]:
- * circular back navigation, pill search bar, morphing filter chips, and
- * asymmetric grouped fix cards with highlighted resolution blocks.
+ * Material 3 Expressive Troubleshooting Guide matching [SettingsActivity]:
+ * clean search bar, morphing filter chips, and airy expandable fix cards
+ * highlighting symptoms and actionable fixes without visual clutter.
  */
 class SiteFixesActivity : AppCompatActivity() {
 
@@ -48,6 +48,7 @@ class SiteFixesActivity : AppCompatActivity() {
         val activeChipText: Int,
         val titleText: Int,
         val bodyText: Int,
+        val subtleText: Int,
         val rippleColor: Int
     )
 
@@ -66,7 +67,6 @@ class SiteFixesActivity : AppCompatActivity() {
     private lateinit var clearSearchBtn: ImageButton
     private lateinit var chipStrip: HorizontalScrollView
     private lateinit var chipContainer: LinearLayout
-    private lateinit var introView: TextView
     private lateinit var countLabel: TextView
     private lateinit var resultsRecycler: RecyclerView
     private val fixesAdapter = FixesAdapter()
@@ -76,6 +76,7 @@ class SiteFixesActivity : AppCompatActivity() {
     private lateinit var emptyStateView: LinearLayout
 
     private val categoryNavItems = mutableMapOf<FixCategory, TextView>()
+    private val expandedIds = mutableSetOf<String>()
     private var selectedCategory: FixCategory = FixCategory.ALL
     private val searchHandler = Handler(Looper.getMainLooper())
     private val searchDebounceRunnable = Runnable { renderResults(animateList = false) }
@@ -94,14 +95,14 @@ class SiteFixesActivity : AppCompatActivity() {
             setBackgroundColor(uiColors.screenBg)
         }
 
-        // Top Header Bar matching SettingsActivity
+        // Top App Bar
         val headerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding((12 * density).toInt(), (10 * density).toInt(), (16 * density).toInt(), (8 * density).toInt())
+            setPadding((16 * density).toInt(), (10 * density).toInt(), (16 * density).toInt(), (8 * density).toInt())
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                (62 * density).toInt()
+                (64 * density).toInt()
             )
         }
         backBtn = ImageButton(this).apply {
@@ -114,7 +115,7 @@ class SiteFixesActivity : AppCompatActivity() {
         }
         titleView = TextView(this).apply {
             text = getString(R.string.fixes_title)
-            textSize = 20f
+            textSize = 21f
             typeface = Typeface.create("sans-serif", Typeface.NORMAL)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -145,14 +146,14 @@ class SiteFixesActivity : AppCompatActivity() {
         headerRow.addView(btnOpenSettings)
         rootLayout.addView(headerRow)
 
-        // Android 16 48dp Pill Search Bar
+        // Material 3 52dp Search Pill
         searchBox = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding((14 * density).toInt(), 0, (8 * density).toInt(), 0)
+            setPadding((16 * density).toInt(), 0, (10 * density).toInt(), 0)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                (48 * density).toInt()
+                (52 * density).toInt()
             ).apply {
                 setMargins((16 * density).toInt(), (2 * density).toInt(), (16 * density).toInt(), (10 * density).toInt())
             }
@@ -161,7 +162,7 @@ class SiteFixesActivity : AppCompatActivity() {
             setImageResource(R.drawable.ic_settings_search)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             layoutParams = LinearLayout.LayoutParams((20 * density).toInt(), (20 * density).toInt()).apply {
-                marginEnd = (10 * density).toInt()
+                marginEnd = (12 * density).toInt()
             }
         }
         searchInput = EditText(this).apply {
@@ -187,7 +188,7 @@ class SiteFixesActivity : AppCompatActivity() {
         searchBox.addView(clearSearchBtn, LinearLayout.LayoutParams((38 * density).toInt(), (38 * density).toInt()))
         rootLayout.addView(searchBox)
 
-        // Horizontal M3 Expressive Filter Chips Bar
+        // Horizontal M3 Expressive Filter Chips
         chipContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -232,27 +233,13 @@ class SiteFixesActivity : AppCompatActivity() {
         }
         rootLayout.addView(chipStrip)
 
-        // Header summary + RecyclerView content area
-        val summaryColumn = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding((16 * density).toInt(), (4 * density).toInt(), (16 * density).toInt(), 0)
-        }
-
-        introView = TextView(this).apply {
-            text = getString(R.string.fixes_intro)
-            textSize = 13f
-            setLineSpacing(2f * density, 1f)
-            setPadding((6 * density).toInt(), (2 * density).toInt(), (6 * density).toInt(), (6 * density).toInt())
-        }
-        summaryColumn.addView(introView)
-
+        // Quiet topic count caption
         countLabel = TextView(this).apply {
-            textSize = 12.5f
+            textSize = 12f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setPadding((6 * density).toInt(), (2 * density).toInt(), (6 * density).toInt(), (10 * density).toInt())
+            setPadding((20 * density).toInt(), (2 * density).toInt(), (20 * density).toInt(), (10 * density).toInt())
         }
-        summaryColumn.addView(countLabel)
-        rootLayout.addView(summaryColumn)
+        rootLayout.addView(countLabel)
 
         val hPad = (16 * density).toInt()
         resultsRecycler = RecyclerView(this).apply {
@@ -310,14 +297,14 @@ class SiteFixesActivity : AppCompatActivity() {
     private fun resolveGuideColors(p: ThemePalette): GuideUiColors {
         val tokens = SnakeTheme.resolveTokens(p, this)
         val browserColors = SnakeTheme.resolveBrowserColors(this, p)
-        val ripple = ColorUtils.setAlphaComponent(if (tokens.isLight) Color.BLACK else Color.WHITE, 30)
+        val ripple = ColorUtils.setAlphaComponent(if (tokens.isLight) Color.BLACK else Color.WHITE, 28)
         return GuideUiColors(
             screenBg = browserColors.bg,
             cardSurface = tokens.cardSurface,
             innerContainer = if (tokens.isLight) {
                 tokens.pillContainer
             } else {
-                ColorUtils.blendARGB(tokens.screenBg, tokens.cardSurface, 0.45f)
+                ColorUtils.blendARGB(tokens.screenBg, tokens.cardSurface, 0.48f)
             },
             backCircleBg = if (tokens.isLight) tokens.pillContainer else tokens.elevatedSurface,
             searchPillBg = if (tokens.isLight) tokens.cardSurface else tokens.elevatedSurface,
@@ -326,6 +313,7 @@ class SiteFixesActivity : AppCompatActivity() {
             activeChipText = tokens.onPrimaryAccent,
             titleText = tokens.textPrimary,
             bodyText = tokens.textSecondary,
+            subtleText = ColorUtils.setAlphaComponent(tokens.textSecondary, 190),
             rippleColor = ripple
         )
     }
@@ -344,23 +332,14 @@ class SiteFixesActivity : AppCompatActivity() {
         backBtn.setColorFilter(uiColors.titleText, PorterDuff.Mode.SRC_IN)
         titleView.setTextColor(uiColors.titleText)
 
-        btnOpenSettings.setTextColor(uiColors.activeChipText)
-        val settingsShape = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(uiColors.activeChipBg)
-            cornerRadius = 18f * density
-        }
-        val settingsMask = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(Color.WHITE)
-            cornerRadius = 18f * density
-        }
-        btnOpenSettings.background = RippleDrawable(ColorStateList.valueOf(uiColors.rippleColor), settingsShape, settingsMask)
+        // Tonal pill button for Settings so it stays calm and balanced in the Top App Bar
+        btnOpenSettings.setTextColor(uiColors.titleText)
+        btnOpenSettings.background = SnakeTheme.pillRippleSurface(uiColors.backCircleBg, uiColors.rippleColor, 18f, density)
 
         searchBox.background = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             setColor(uiColors.searchPillBg)
-            cornerRadius = 24f * density
+            cornerRadius = 26f * density
         }
         searchIcon.setColorFilter(uiColors.bodyText, PorterDuff.Mode.SRC_IN)
         searchInput.setTextColor(uiColors.titleText)
@@ -368,26 +347,21 @@ class SiteFixesActivity : AppCompatActivity() {
         SnakeTheme.styleEditTextAccent(searchInput, palette, this)
         clearSearchBtn.setColorFilter(uiColors.bodyText, PorterDuff.Mode.SRC_IN)
 
-        introView.setTextColor(uiColors.bodyText)
-        countLabel.setTextColor(uiColors.accentHeader)
+        countLabel.setTextColor(uiColors.subtleText)
         emptyTitleView.setTextColor(uiColors.titleText)
         emptyBodyView.setTextColor(uiColors.bodyText)
         emptyResetBtn.setTextColor(uiColors.activeChipText)
-        emptyResetBtn.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(uiColors.activeChipBg)
-            cornerRadius = 20f * density
-        }
+        emptyResetBtn.background = SnakeTheme.pillRippleSurface(uiColors.activeChipBg, uiColors.rippleColor, 20f, density)
     }
 
     private fun updateCategoryRail() {
         for ((cat, item) in categoryNavItems) {
             val active = cat == selectedCategory
             val chipBg = if (active) uiColors.activeChipBg else uiColors.cardSurface
-            // Active chips morph from 18dp pill toward 12dp rounded square (M3 Expressive shape change)
+            // M3 Expressive shape morphing: 18dp pill -> 12dp rounded square when active
             item.background = SnakeTheme.pillRippleSurface(chipBg, uiColors.rippleColor, if (active) 12f else 18f, density)
             item.setTextColor(if (active) uiColors.activeChipText else uiColors.bodyText)
-            item.typeface = Typeface.create("sans-serif-medium", if (active) Typeface.BOLD else Typeface.NORMAL)
+            item.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
     }
 
@@ -463,12 +437,12 @@ class SiteFixesActivity : AppCompatActivity() {
         }
 
         override fun onBindViewHolder(holder: FixHolder, position: Int) {
-            val seam = (2f * density).toInt().coerceAtLeast(1)
+            val gap = (10 * density).toInt()
             val lp = holder.slot.layoutParams as RecyclerView.LayoutParams
-            lp.topMargin = if (position > 0) seam else 0
+            lp.topMargin = if (position > 0) gap else 0
             holder.slot.layoutParams = lp
             holder.slot.removeAllViews()
-            holder.slot.addView(buildExpressiveCard(items[position], query, position, items.size))
+            holder.slot.addView(buildExpressiveCard(items[position], query))
         }
 
         override fun onViewRecycled(holder: FixHolder) {
@@ -479,71 +453,90 @@ class SiteFixesActivity : AppCompatActivity() {
 
     private fun buildExpressiveCard(
         match: FixGuideMatch,
-        query: String,
-        index: Int,
-        count: Int
+        query: String
     ): View {
+        val queryMatchedCause = query.isNotBlank() &&
+            match.cause.contains(query.trim(), ignoreCase = true)
+        var isExpanded = expandedIds.contains(match.entry.id) || queryMatchedCause
+
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = SnakeTheme.asymmetricCardSurface(
-                fillColor = uiColors.cardSurface,
-                rippleColor = Color.TRANSPARENT,
-                index = index,
-                count = count,
-                density = density
-            )
+            background = SnakeTheme.pillRippleSurface(uiColors.cardSurface, uiColors.rippleColor, 22f, density)
             val padH = (18 * density).toInt()
             val padV = (16 * density).toInt()
             setPadding(padH, padV, padH, padV)
+            isClickable = true
+            isFocusable = true
         }
 
+        // Top row: Title (+ subtle category overline when viewing All) + Expand chevron
         val headerLine = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, (8 * density).toInt())
+            gravity = Gravity.TOP
         }
-        val title = TextView(this).apply {
-            text = SiteFixGuide.highlight(match.title, query, uiColors.accentHeader)
-            textSize = 16f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setTextColor(uiColors.titleText)
+        val titleStack = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = (8 * density).toInt()
+                marginEnd = (10 * density).toInt()
             }
         }
-        val badge = TextView(this).apply {
-            text = getString(match.entry.category.labelRes)
-            textSize = 11f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setTextColor(uiColors.accentHeader)
-            background = SnakeTheme.roundedSurface(uiColors.innerContainer, Color.TRANSPARENT, 10f, density)
-            setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
+        if (selectedCategory == FixCategory.ALL) {
+            titleStack.addView(TextView(this).apply {
+                text = getString(match.entry.category.labelRes)
+                textSize = 11.5f
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setTextColor(uiColors.accentHeader)
+                setPadding(0, 0, 0, (2 * density).toInt())
+            })
         }
-        headerLine.addView(title)
-        headerLine.addView(badge)
+        titleStack.addView(TextView(this).apply {
+            text = SiteFixGuide.highlight(match.title, query, uiColors.accentHeader)
+            textSize = 16.5f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(uiColors.titleText)
+            setLineSpacing(2f * density, 1f)
+        })
+
+        val chevron = ImageView(this).apply {
+            setImageResource(R.drawable.ic_expand_more)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setColorFilter(uiColors.subtleText, PorterDuff.Mode.SRC_IN)
+            rotation = if (isExpanded) 180f else 0f
+            layoutParams = LinearLayout.LayoutParams((22 * density).toInt(), (22 * density).toInt()).apply {
+                topMargin = (2 * density).toInt()
+            }
+        }
+        headerLine.addView(titleStack)
+        headerLine.addView(chevron)
         card.addView(headerLine)
 
-        card.addView(buildInlineLine(getString(R.string.fixes_label_symptoms), match.symptoms, query, uiColors.bodyText, uiColors.accentHeader))
-        card.addView(buildInlineLine(getString(R.string.fixes_label_cause), match.cause, query, uiColors.bodyText, uiColors.accentHeader))
+        // Direct symptoms description without redundant sub-heading
+        card.addView(TextView(this).apply {
+            text = SiteFixGuide.highlight(match.symptoms, query, uiColors.accentHeader)
+            textSize = 13.5f
+            setTextColor(uiColors.bodyText)
+            setLineSpacing(2.5f * density, 1f)
+            setPadding(0, (6 * density).toInt(), 0, 0)
+        })
 
-        // Highlighted Resolution Pill Box
+        // Highlighted M3 Tonal Fix Container (primary actionable answer)
         val fixBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = SnakeTheme.roundedSurface(uiColors.innerContainer, Color.TRANSPARENT, 14f, density)
+            background = SnakeTheme.roundedSurface(uiColors.innerContainer, Color.TRANSPARENT, 16f, density)
             val pH = (14 * density).toInt()
-            val pV = (10 * density).toInt()
+            val pV = (11 * density).toInt()
             setPadding(pH, pV, pH, pV)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                topMargin = (6 * density).toInt()
+                topMargin = (12 * density).toInt()
             }
         }
         fixBox.addView(TextView(this).apply {
             text = getString(R.string.fixes_label_fix)
             textSize = 11.5f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setTextColor(uiColors.accentHeader)
             setPadding(0, 0, 0, (2 * density).toInt())
         })
@@ -551,37 +544,50 @@ class SiteFixesActivity : AppCompatActivity() {
             text = SiteFixGuide.highlight(match.fixPath, query, uiColors.accentHeader)
             textSize = 13.5f
             setTextColor(uiColors.titleText)
+            setLineSpacing(2.5f * density, 1f)
         })
         card.addView(fixBox)
-        return card
-    }
 
-    private fun buildInlineLine(
-        label: String,
-        body: String,
-        query: String,
-        bodyColor: Int,
-        labelColor: Int
-    ): View {
-        val block = LinearLayout(this).apply {
+        // Expandable technical cause ("Why it happens") — hidden by default to keep cards airy
+        val causeBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, (2 * density).toInt(), 0, (6 * density).toInt())
+            visibility = if (isExpanded) View.VISIBLE else View.GONE
+            setPadding((2 * density).toInt(), (10 * density).toInt(), (2 * density).toInt(), 0)
         }
-        val heading = TextView(this).apply {
-            text = label
+        causeBox.addView(TextView(this).apply {
+            text = getString(R.string.fixes_label_cause)
             textSize = 11.5f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setTextColor(labelColor)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(uiColors.accentHeader)
+            setPadding(0, 0, 0, (2 * density).toInt())
+        })
+        causeBox.addView(TextView(this).apply {
+            text = SiteFixGuide.highlight(match.cause, query, uiColors.accentHeader)
+            textSize = 13f
+            setTextColor(uiColors.bodyText)
+            setLineSpacing(2.5f * density, 1f)
+        })
+        card.addView(causeBox)
+
+        card.setOnClickListener {
+            isExpanded = !isExpanded
+            if (isExpanded) {
+                expandedIds.add(match.entry.id)
+                causeBox.visibility = View.VISIBLE
+                causeBox.alpha = 0f
+                causeBox.animate().alpha(1f).setDuration(160L).start()
+            } else {
+                expandedIds.remove(match.entry.id)
+                causeBox.visibility = View.GONE
+            }
+            chevron.animate()
+                .rotation(if (isExpanded) 180f else 0f)
+                .setDuration(180L)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
         }
-        val text = TextView(this).apply {
-            text = SiteFixGuide.highlight(body, query, uiColors.accentHeader)
-            textSize = 13.5f
-            setTextColor(bodyColor)
-            setPadding(0, (1 * density).toInt(), 0, 0)
-        }
-        block.addView(heading)
-        block.addView(text)
-        return block
+
+        return card
     }
 
     private fun buildEmptyStateView(): LinearLayout {
@@ -589,11 +595,11 @@ class SiteFixesActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             visibility = View.GONE
-            setPadding((16 * density).toInt(), (32 * density).toInt(), (16 * density).toInt(), (24 * density).toInt())
+            setPadding((24 * density).toInt(), (40 * density).toInt(), (24 * density).toInt(), (24 * density).toInt())
         }
         emptyTitleView = TextView(this).apply {
             text = getString(R.string.fixes_empty_title)
-            textSize = 16f
+            textSize = 17f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, (6 * density).toInt())
@@ -602,13 +608,15 @@ class SiteFixesActivity : AppCompatActivity() {
             text = getString(R.string.fixes_empty_body)
             textSize = 13.5f
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, (16 * density).toInt())
+            setLineSpacing(2.5f * density, 1f)
+            setPadding(0, 0, 0, (18 * density).toInt())
         }
         emptyResetBtn = TextView(this).apply {
             text = getString(R.string.fixes_reset_filters)
             textSize = 14f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             gravity = Gravity.CENTER
+            minHeight = (40 * density).toInt()
             val hPad = (20 * density).toInt()
             val vPad = (10 * density).toInt()
             setPadding(hPad, vPad, hPad, vPad)
